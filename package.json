@@ -1,0 +1,24 @@
+{
+  "name": "roku-flightlane-self-hosted",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Self-hosted local service and Roku app for Flight Lane.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "api": "node server/server.mjs",
+    "build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1",
+    "build:screensaver": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -ScreenSaver",
+    "deploy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
+    "debug": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/debug.ps1",
+    "diagnose": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose.ps1",
+    "check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate.ps1",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "brighterscript": "0.73.0"
+  }
+}

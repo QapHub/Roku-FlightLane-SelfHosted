@@ -1,0 +1,10 @@
+{
+  "rootDir": ".",
+  "files": [
+    "source/**/*",
+    "screensaver/source/**/*",
+    "components/**/*",
+    "manifest"
+  ],
+  "createPackage": false
+}

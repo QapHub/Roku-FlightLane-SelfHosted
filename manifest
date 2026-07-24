@@ -1,0 +1,15 @@
+title=Flight Lane
+major_version=1
+minor_version=0
+build_version=0
+ui_resolutions=fhd
+rsg_version=1.3
+mm_icon_focus_fhd=pkg:/images/flightlane-icon-v2_FHD.png
+mm_icon_focus_hd=pkg:/images/flightlane-icon-v2_HD.png
+mm_icon_focus_sd=pkg:/images/flightlane-icon-v2_SD.png
+splash_screen_fhd=pkg:/images/splash-screen_FHD.jpg
+splash_screen_hd=pkg:/images/splash-screen_HD.jpg
+splash_screen_sd=pkg:/images/splash-screen_SD.jpg
+splash_color=#07111F
+splash_min_time=1000
+supports_input_launch=0

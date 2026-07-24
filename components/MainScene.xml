@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="MainScene" extends="Scene">
+    <interface>
+        <field id="memoryUsagePercent" type="integer" value="0" alwaysNotify="true" onChange="OnMemoryUsagePercentChanged" />
+        <field id="generalMemoryLevel" type="string" value="normal" alwaysNotify="true" onChange="OnGeneralMemoryLevelChanged" />
+    </interface>
+    <children>
+        <Rectangle width="1920" height="1080" color="0x07111FFF" />
+        <Rectangle translation="[0,0]" width="1920" height="136" color="0x0B1B2CFF" />
+
+        <Label id="appTitle" translation="[48,34]" width="600" height="58" text="Flight Lane" color="0xFFFFFFFF" />
+        <Label id="subtitle" translation="[50,91]" width="850" height="34" color="0x8DA8C2FF" />
+        <Label id="statusLabel" translation="[700,46]" width="700" height="42" text="READY" color="0x7DD3FCFF" horizAlign="right" />
+        <Label translation="[900,96]" width="390" height="32" text="24 HOUR FLYOVER COUNT:" color="0x8DA8C2FF" horizAlign="right" vertAlign="center" font="font:SmallSystemFont" />
+        <Label id="flyoverCountLabel" translation="[1310,88]" width="90" height="48" text="0" color="0x7DD3FCFF" horizAlign="right" vertAlign="center" font="font:MediumBoldSystemFont" />
+        <Label id="currentDateLabel" translation="[1440,24]" width="410" height="28" color="0x8DA8C2FF" horizAlign="right" font="font:SmallSystemFont" />
+        <Label id="currentTimeLabel" translation="[1440,51]" width="410" height="52" color="0xFFFFFFFF" horizAlign="right" />
+
+        <Group id="setupPanel" visible="false">
+            <Rectangle translation="[390,250]" width="1140" height="540" color="0x10263AFF" />
+            <Label translation="[490,330]" width="940" height="64" text="Welcome to Flight Lane" color="0xFFFFFFFF" horizAlign="center" />
+            <Label id="setupMessage" translation="[520,430]" width="880" height="150" wrap="true" numLines="4" text="Enter your home address to build a private local flight radar. Your saved address stays on this Roku." color="0xBED3E6FF" horizAlign="center" vertAlign="center" />
+            <Label translation="[540,625]" width="840" height="48" text="Press OK to enter your address" color="0x38BDF8FF" horizAlign="center" />
+        </Group>
+
+        <Group id="mainPanel" visible="false">
+            <Rectangle translation="[30,155]" width="870" height="850" color="0x0B1B2CFF" />
+            <Group id="radarViewport" translation="[45,160]" clippingRect="[0,0,840,840]">
+                <Poster id="satelliteMap" width="840" height="840" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" />
+                <Rectangle width="840" height="840" color="0x06131F44" />
+                <Poster id="overviewRadar" width="840" height="840" uri="pkg:/images/radar-bg.png" loadDisplayMode="scaleToFit" />
+                <Group id="markerLayer" />
+            </Group>
+            <Label translation="[410,142]" width="90" height="36" text="N" color="0x7DD3FCFF" horizAlign="center" />
+            <Label translation="[410,980]" width="90" height="36" text="S" color="0x7DD3FCFF" horizAlign="center" />
+            <Label translation="[26,565]" width="70" height="36" text="W" color="0x7DD3FCFF" horizAlign="center" />
+            <Label translation="[850,565]" width="70" height="36" text="E" color="0x7DD3FCFF" horizAlign="center" />
+            <Label id="rangeLabel" translation="[70,935]" width="360" height="42" color="0x7DD3FCFF" />
+
+            <Label translation="[930,165]" width="340" height="42" text="NEARBY AIRCRAFT" color="0x8DA8C2FF" />
+            <LabelList id="aircraftList" translation="[920,215]" itemSize="[350,56]" numRows="6" color="0x9EB5C9FF" focusedColor="0xFFFFFFFF" />
+            <Label id="emptyLabel" translation="[930,330]" width="330" height="130" wrap="true" numLines="3" text="No aircraft are currently inside the radar range." color="0x8DA8C2FF" visible="false" horizAlign="center" vertAlign="center" />
+            <Group id="closeupPip" translation="[920,610]" visible="false">
+                <Rectangle width="350" height="380" color="0x07111FFF" />
+                <Rectangle translation="[3,3]" width="344" height="374" color="0x38BDF8FF" />
+                <Rectangle translation="[6,6]" width="338" height="368" color="0x0B1B2CFF" />
+                <Label id="closeupPipTitle" translation="[15,10]" width="320" height="34" color="0xDDF4FFFF" horizAlign="center" />
+                <Group translation="[15,45]" clippingRect="[0,0,320,320]">
+                    <Poster id="closeupSatelliteMapA" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" />
+                    <Poster id="closeupSatelliteMapB" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" visible="false" />
+                    <Rectangle width="320" height="320" color="0x06131F33" />
+                    <Group id="closeupMarkerLayer" />
+                    <Group id="closeupAttributionClipA" clippingRect="[0,0,320,12]" visible="false">
+                        <Poster id="closeupAttributionA" translation="[0,-308]" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" />
+                    </Group>
+                    <Group id="closeupAttributionClipB" clippingRect="[0,0,320,12]" visible="false">
+                        <Poster id="closeupAttributionB" translation="[0,-308]" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" />
+                    </Group>
+                </Group>
+            </Group>
+
+            <Rectangle translation="[1285,155]" width="605" height="850" color="0x0E2236FF" />
+            <Label translation="[1320,175]" width="520" height="36" text="SELECTED FLIGHT" color="0x8DA8C2FF" />
+            <Label id="selectedTitle" translation="[1320,215]" width="520" height="58" text="Waiting for live traffic" color="0xFFFFFFFF" />
+            <Rectangle id="airlineBadgeBackground" translation="[1320,276]" width="530" height="40" color="0x24415AFF" />
+            <Label id="airlineCodeValue" translation="[1332,279]" width="60" height="34" text="GEN" color="0xFFFFFFFF" horizAlign="center" vertAlign="center" font="font:MediumBoldSystemFont" />
+            <Label id="airlineNameValue" translation="[1402,279]" width="430" height="34" text="Private / unidentified" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+            <Label id="selectedMeta" translation="[1320,320]" width="520" height="26" color="0x94AFC7FF" />
+
+            <Group id="aircraftPhotoCard" translation="[1598,176]" visible="false">
+                <Rectangle width="254" height="170" color="0x38BDF8FF" />
+                <Rectangle translation="[3,3]" width="248" height="164" color="0x07111FFF" />
+                <Poster id="aircraftPhoto" translation="[5,5]" width="244" height="162" loadDisplayMode="scaleToFit" />
+                <Rectangle translation="[5,137]" width="244" height="30" color="0x020913DD" />
+                <Label id="aircraftPhotoAttribution" translation="[10,141]" width="234" height="22" color="0xFFFFFFFF" horizAlign="center" vertAlign="center" font="font:SmallSystemFont" />
+            </Group>
+
+            <Rectangle translation="[1320,350]" width="250" height="108" color="0x132E45FF" />
+            <Label translation="[1340,365]" width="210" height="30" text="ALTITUDE" color="0x7896B0FF" />
+            <Label id="altitudeValue" translation="[1340,401]" width="210" height="44" text="—" color="0xFFFFFFFF" />
+            <Rectangle translation="[1590,350]" width="260" height="108" color="0x132E45FF" />
+            <Label translation="[1610,365]" width="220" height="30" text="GROUND SPEED" color="0x7896B0FF" />
+            <Label id="speedValue" translation="[1610,401]" width="220" height="44" text="—" color="0xFFFFFFFF" />
+
+            <Rectangle translation="[1320,478]" width="250" height="108" color="0x132E45FF" />
+            <Label translation="[1340,493]" width="210" height="30" text="DISTANCE" color="0x7896B0FF" />
+            <Label id="distanceValue" translation="[1340,529]" width="210" height="44" text="—" color="0xFFFFFFFF" />
+            <Rectangle translation="[1590,478]" width="260" height="108" color="0x132E45FF" />
+            <Label translation="[1610,493]" width="220" height="30" text="HEADING" color="0x7896B0FF" />
+            <Label id="headingValue" translation="[1610,529]" width="220" height="44" text="—" color="0xFFFFFFFF" />
+
+            <Label translation="[1320,625]" width="250" height="32" text="FLIGHT PHASE" color="0x7896B0FF" />
+            <Label id="phaseValue" translation="[1320,660]" width="520" height="42" text="—" color="0xFBBF24FF" />
+            <Label id="projectionValue" translation="[1320,710]" width="520" height="70" wrap="true" numLines="2" text="—" color="0x7DD3FCFF" />
+
+            <Label translation="[1320,805]" width="250" height="32" text="ROUTE" color="0x7896B0FF" />
+            <Label id="routeValue" translation="[1320,840]" width="520" height="44" text="Looking up route…" color="0xFFFFFFFF" />
+            <Label id="flightStatusValue" translation="[1320,890]" width="520" height="34" color="0x9EB5C9FF" />
+            <Label id="departureValue" translation="[1320,930]" width="520" height="32" color="0x7896B0FF" />
+            <Label id="arrivalValue" translation="[1320,964]" width="520" height="32" color="0x7896B0FF" />
+        </Group>
+
+        <Group id="settingsPanel" visible="false">
+            <Rectangle translation="[0,136]" width="1920" height="894" color="0x020913EE" />
+            <Rectangle translation="[390,195]" width="1140" height="750" color="0x10263AFF" />
+            <Label translation="[460,245]" width="1000" height="58" text="FLIGHT LANE SETTINGS" color="0xFFFFFFFF" horizAlign="center" />
+            <Label translation="[505,330]" width="910" height="32" text="HOME LOCATION" color="0x7896B0FF" />
+            <Label id="settingsAddressLabel" translation="[505,370]" width="910" height="72" wrap="true" numLines="2" color="0xDDF4FFFF" />
+            <LabelList id="settingsList" translation="[500,470]" itemSize="[920,64]" numRows="4" color="0xBED3E6FF" focusedColor="0xFFFFFFFF" />
+            <Label translation="[500,790]" width="920" height="80" wrap="true" numLines="2" text="Choose a setting below. Changes are saved automatically." color="0x7DD3FCFF" horizAlign="center" />
+        </Group>
+
+        <Rectangle translation="[0,1015]" width="1920" height="65" color="0x081725FF" />
+        <Rectangle translation="[0,1015]" width="1920" height="2" color="0x23445FFF" />
+
+        <Group id="footerControls" translation="[0,1015]" visible="false">
+            <Poster translation="[250,3]" width="58" height="58" uri="pkg:/images/remote-dpad.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[330,8]" width="390" height="48" text="SELECT / TRACK CLOSEST" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+
+            <Rectangle translation="[745,10]" width="2" height="45" color="0x23445FFF" />
+
+            <Poster translation="[820,3]" width="58" height="58" uri="pkg:/images/remote-ok.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[900,8]" width="265" height="48" text="REFRESH NOW" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+
+            <Rectangle translation="[1210,10]" width="2" height="45" color="0x23445FFF" />
+
+            <Poster translation="[1285,3]" width="76" height="58" uri="pkg:/images/remote-options.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[1380,8]" width="280" height="48" text="SETTINGS" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+        </Group>
+
+        <Group id="footerSettingsControls" translation="[0,1015]" visible="false">
+            <Poster translation="[100,3]" width="58" height="58" uri="pkg:/images/remote-dpad.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[178,8]" width="220" height="48" text="ADJUST VALUE" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+
+            <Rectangle translation="[440,10]" width="2" height="45" color="0x23445FFF" />
+
+            <Poster translation="[500,3]" width="58" height="58" uri="pkg:/images/remote-ok.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[578,8]" width="220" height="48" text="CHOOSE" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+
+            <Rectangle translation="[860,10]" width="2" height="45" color="0x23445FFF" />
+
+            <Poster translation="[920,3]" width="76" height="58" uri="pkg:/images/remote-back.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[1010,8]" width="190" height="48" text="CLOSE" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+
+            <Rectangle translation="[1270,10]" width="2" height="45" color="0x23445FFF" />
+
+            <Poster translation="[1330,3]" width="76" height="58" uri="pkg:/images/remote-options.png" loadDisplayMode="scaleToFit" />
+            <Label translation="[1420,8]" width="300" height="48" text="CLOSE SETTINGS" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
+        </Group>
+
+        <Label id="footerLabel" translation="[50,1027]" width="1820" height="38" visible="true" text="LOADING FLIGHT LANE…" color="0x8DA8C2FF" horizAlign="center" vertAlign="center" font="font:SmallSystemFont" />
+        <Timer id="refreshTimer" repeat="true" duration="15" />
+        <Timer id="motionTimer" repeat="true" duration="1" />
+        <Timer id="clockTimer" repeat="true" duration="1" />
+        <Timer id="detailCooldownTimer" repeat="false" duration="6" />
+        <Timer id="idleTimer" repeat="false" duration="600" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/source/config.generated.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/components/MainScene.brs" />
+</component>

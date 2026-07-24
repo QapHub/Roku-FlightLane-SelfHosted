@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component name="ScreensaverSettingsScene" extends="Scene">
+    <interface>
+        <field id="finished" type="boolean" alwaysNotify="true" />
+    </interface>
+
+    <children>
+        <Rectangle width="1920" height="1080" color="0x07111FFF" />
+        <Rectangle translation="[310,150]" width="1300" height="780" color="0x10263AFF" />
+        <Label translation="[380,220]" width="1160" height="70" text="FLIGHT LANE SCREENSAVER SETTINGS" color="0xFFFFFFFF" horizAlign="center" />
+        <Label translation="[430,335]" width="1060" height="34" text="HOME LOCATION" color="0x7896B0FF" />
+        <Label id="addressLabel" translation="[430,380]" width="1060" height="90" wrap="true" numLines="2" color="0xDDF4FFFF" />
+        <LabelList id="settingsList" translation="[420,520]" itemSize="[1080,68]" numRows="3" color="0xBED3E6FF" focusedColor="0xFFFFFFFF" />
+        <Label id="statusLabel" translation="[430,790]" width="1060" height="55" color="0x7DD3FCFF" horizAlign="center" />
+        <Label translation="[430,860]" width="1060" height="34" text="OK: choose    LEFT/RIGHT: adjust radius    BACK: exit" color="0x58758FFF" horizAlign="center" />
+    </children>
+
+    <script type="text/brightscript" uri="pkg:/source/config.generated.brs" />
+    <script type="text/brightscript" uri="pkg:/source/Utils.brs" />
+    <script type="text/brightscript" uri="pkg:/components/ScreensaverSettingsScene.brs" />
+</component>
