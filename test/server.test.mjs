@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createConfig,
   createFlightLaneServer,
+  fetchAircraftPositionsFromProviders,
   isPrivateNetworkAddress,
   normalizeProviderPayload,
   parseEnv,
@@ -52,6 +53,10 @@ test("createConfig keeps optional provider keys disabled when blank", () => {
   assert.equal(config.geocodingKey, "");
   assert.equal(config.flightAwareKey, "");
   assert.equal(config.localNetworkOnly, true);
+  assert.deepEqual(
+    config.aircraftProviders.map((provider) => provider.name),
+    ["airplanes.live", "adsb.lol", "adsb.fi"],
+  );
 });
 
 test("photo payload normalization allows only expected HTTPS hosts", () => {
@@ -129,4 +134,59 @@ test("nearby requests are cached and convert statute miles to nautical miles", a
   assert.equal(second.headers.get("x-flightlane-cache"), "hit");
   assert.equal(requestedUrls.length, 1);
   assert.match(requestedUrls[0], /\/point\/28\.5\/-81\.6\/3\.476$/);
+});
+
+test("nearby requests fall back when the configured aircraft provider fails", async () => {
+  const requestedUrls = [];
+  const fetchImpl = async (url) => {
+    requestedUrls.push(String(url));
+    if (requestedUrls.length === 1) {
+      return new Response(JSON.stringify({ error: "blocked" }), { status: 403 });
+    }
+    return Response.json({ ac: [], now: 1234567890000 });
+  };
+
+  const result = await fetchAircraftPositionsFromProviders({
+    fetchImpl,
+    providers: testConfig().aircraftProviders,
+    latitude: 28.5,
+    longitude: -81.6,
+    radiusNauticalMiles: 3.476,
+    timeoutMs: 1000,
+  });
+
+  assert.equal(result.provider, "adsb.lol");
+  assert.deepEqual(result.failures, [{ provider: "airplanes.live", status: 403 }]);
+  assert.match(requestedUrls[0], /^https:\/\/api\.airplanes\.live\/v2\/point\/28\.5\/-81\.6\/3\.476$/);
+  assert.match(requestedUrls[1], /^https:\/\/api\.adsb\.lol\/v2\/point\/28\.5\/-81\.6\/3\.476$/);
+});
+
+test("aircraft provider fallback supports ADSB.fi named path style", async () => {
+  const requestedUrls = [];
+  const fetchImpl = async (url) => {
+    requestedUrls.push(String(url));
+    if (requestedUrls.length < 3) {
+      return new Response(JSON.stringify({ error: "busy" }), { status: 429 });
+    }
+    return Response.json({ ac: [], now: 1234567890000 });
+  };
+
+  const result = await fetchAircraftPositionsFromProviders({
+    fetchImpl,
+    providers: testConfig().aircraftProviders,
+    latitude: 28.5,
+    longitude: -81.6,
+    radiusNauticalMiles: 3.476,
+    timeoutMs: 1000,
+  });
+
+  assert.equal(result.provider, "adsb.fi");
+  assert.deepEqual(result.failures, [
+    { provider: "airplanes.live", status: 429 },
+    { provider: "adsb.lol", status: 429 },
+  ]);
+  assert.equal(
+    requestedUrls[2],
+    "https://opendata.adsb.fi/api/v3/lat/28.5/lon/-81.6/dist/3.476",
+  );
 });

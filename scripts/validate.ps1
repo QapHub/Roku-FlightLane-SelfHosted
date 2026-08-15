@@ -30,6 +30,8 @@ try {
 
     $providerMarkers = @(
         "api.airplanes.live",
+        "api.adsb.lol",
+        "opendata.adsb.fi",
         "aeroapi.flightaware.com",
         "maps.googleapis.com",
         "api.planespotters.net",

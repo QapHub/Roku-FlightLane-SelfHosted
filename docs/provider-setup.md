@@ -4,7 +4,7 @@ Provider products, allowances, prices, and license terms can change. Check each 
 
 ## Live aircraft positions
 
-Flight Lane defaults to the [Airplanes.live REST API](https://airplanes.live/api-guide/) point endpoint. No key is currently required for that endpoint.
+Flight Lane defaults to the [Airplanes.live REST API](https://airplanes.live/api-guide/) point endpoint. No key is currently required for that endpoint. If the configured provider is blocked or temporarily unavailable, the local service falls back to ADSB.lol and then ADSB.fi.
 
 Relevant `.env.local` settings:
 
@@ -14,6 +14,8 @@ AIRCRAFT_CACHE_SECONDS=15
 ```
 
 `AIRCRAFT_CACHE_SECONDS` is the minimum time between upstream requests for the same rounded location and radius. Multiple local Roku refreshes during that window reuse the in-memory response.
+
+Backup provider requests use the same rounded location, radius, timeout, and cache window. They are only tried after an earlier provider fails, so normal use still starts with your configured `AIRCRAFT_API_BASE_URL`.
 
 Airplanes.live currently lists:
 
@@ -37,6 +39,8 @@ Examples:
 | 10 seconds | 8,640 | Matches the currently listed contributor allowance ceiling |
 
 The interface animates projected motion between responses, but a longer cache means less authoritative position correction. Do not set a shorter interval than your provider access permits.
+
+FlightAware is not used for live position fallback by default because its position-search endpoints may be billed. The FlightAware key below is used only for optional route enrichment.
 
 ## Satellite maps and address lookup
 

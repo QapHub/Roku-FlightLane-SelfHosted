@@ -96,6 +96,7 @@ The local service:
 - validates every coordinate, radius, zoom, callsign, and registration;
 - limits request and response sizes;
 - keeps short-lived data in memory to reduce duplicate provider calls;
+- tries ADSB.lol and ADSB.fi if the configured live-aircraft provider is unavailable;
 - does not write addresses, coordinates, device identifiers, or provider responses to disk;
 - reports only feature availability—not key values—from `/health`.
 
@@ -105,7 +106,7 @@ Never forward port `8787` from your router or expose it directly to the internet
 
 The Roku can refresh its local display more often than the service calls a provider. `REFRESH_SECONDS` controls Roku-to-computer refreshes; `AIRCRAFT_CACHE_SECONDS` controls upstream live-aircraft refreshes.
 
-Airplanes.live currently documents a one-request-per-second limit and plan-specific daily allowances. A cache of 180 seconds is at most 480 upstream calls during 24 hours of continuous use; a 15-second cache can make up to 5,760. Choose a value permitted by your current access level and use. See [Provider setup](docs/provider-setup.md) before leaving the app running continuously.
+Flight Lane tries the configured live-aircraft provider first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.lol and then ADSB.fi. Airplanes.live currently documents a one-request-per-second limit and plan-specific daily allowances. A cache of 180 seconds is at most 480 upstream calls during 24 hours of continuous use; a 15-second cache can make up to 5,760. Choose a value permitted by your current access level and use. See [Provider setup](docs/provider-setup.md) before leaving the app running continuously.
 
 FlightAware enrichment is optional and may be billed. It is disabled when `FLIGHTAWARE_API_KEY` is blank. Successful detail responses are cached for 15 minutes by default.
 
@@ -117,7 +118,7 @@ A Roku holds only one sideloaded development app at a time. Installing another d
 
 The street address is sent from the Roku to your computer and forwarded to Google only for geocoding. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
 
-Nearby coordinates are sent to the configured live-aircraft provider. Map coordinates are sent to Google. A selected callsign may be sent to FlightAware, and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
+Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.lol or ADSB.fi. Map coordinates are sent to Google. A selected callsign may be sent to FlightAware, and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
 
 Flight Lane contains no analytics or advertising SDK. See [SECURITY.md](SECURITY.md) for key-handling guidance.
 

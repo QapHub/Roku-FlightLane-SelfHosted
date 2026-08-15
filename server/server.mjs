@@ -8,6 +8,18 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(MODULE_DIR, "..");
 const DEFAULT_ENV_PATH = path.join(REPO_ROOT, ".env.local");
 const DEFAULT_AIRCRAFT_API = "https://api.airplanes.live/v2";
+const BACKUP_AIRCRAFT_PROVIDERS = [
+  {
+    name: "adsb.lol",
+    baseUrl: "https://api.adsb.lol/v2",
+    pathStyle: "positional",
+  },
+  {
+    name: "adsb.fi",
+    baseUrl: "https://opendata.adsb.fi/api/v3",
+    pathStyle: "named",
+  },
+];
 const FLIGHT_DETAILS_API = "https://aeroapi.flightaware.com/aeroapi";
 const GEOCODING_API = "https://maps.googleapis.com/maps/api/geocode/json";
 const STATIC_MAP_API = "https://maps.googleapis.com/maps/api/staticmap";
@@ -126,6 +138,7 @@ export function createConfig(environment) {
     localNetworkOnly: booleanSetting(environment, "LOCAL_NETWORK_ONLY", true),
     timeoutMs: numberSetting(environment, "PROVIDER_TIMEOUT_MS", 10000, 1000, 60000),
     aircraftBaseUrl,
+    aircraftProviders: createAircraftProviders(aircraftBaseUrl),
     aircraftCacheSeconds: numberSetting(
       environment,
       "AIRCRAFT_CACHE_SECONDS",
@@ -156,6 +169,39 @@ export function createConfig(environment) {
       86400,
     ),
   };
+}
+
+function createAircraftProviders(configuredBaseUrl) {
+  const providers = [
+    aircraftProviderForBaseUrl(configuredBaseUrl),
+    ...BACKUP_AIRCRAFT_PROVIDERS,
+  ];
+  const seen = new Set();
+  return providers.filter((provider) => {
+    const key = `${provider.pathStyle}:${provider.baseUrl.replace(/\/+$/, "")}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function aircraftProviderForBaseUrl(baseUrl) {
+  const normalizedBaseUrl = String(baseUrl).replace(/\/+$/, "");
+  const hostname = new URL(normalizedBaseUrl).hostname.toLowerCase();
+  if (hostname.endsWith("adsb.fi")) {
+    return { name: "adsb.fi", baseUrl: normalizedBaseUrl, pathStyle: "named" };
+  }
+  if (hostname.endsWith("adsb.lol")) {
+    return { name: "adsb.lol", baseUrl: normalizedBaseUrl, pathStyle: "positional" };
+  }
+  if (hostname.endsWith("airplanes.live")) {
+    return {
+      name: "airplanes.live",
+      baseUrl: normalizedBaseUrl,
+      pathStyle: "positional",
+    };
+  }
+  return { name: hostname || "configured", baseUrl: normalizedBaseUrl, pathStyle: "positional" };
 }
 
 export function isPrivateNetworkAddress(rawAddress) {
@@ -321,6 +367,81 @@ function requestSignal(timeoutMs) {
   return AbortSignal.timeout(timeoutMs);
 }
 
+function isAircraftPositionPayload(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    (Array.isArray(value.ac) || Array.isArray(value.aircraft))
+  );
+}
+
+function aircraftProviderUrl(provider, latitude, longitude, radiusNauticalMiles) {
+  if (provider.pathStyle === "named") {
+    return `${provider.baseUrl}/lat/${latitude}/lon/${longitude}/dist/${radiusNauticalMiles}`;
+  }
+  return `${provider.baseUrl}/point/${latitude}/${longitude}/${radiusNauticalMiles}`;
+}
+
+function logAircraftProviderFailure(provider, providerStatus, reason = "http_error") {
+  console.error(
+    JSON.stringify({
+      event: "provider_error",
+      feature: "Aircraft data",
+      provider,
+      providerStatus,
+      reason,
+    }),
+  );
+}
+
+export async function fetchAircraftPositionsFromProviders({
+  fetchImpl = globalThis.fetch,
+  providers,
+  latitude,
+  longitude,
+  radiusNauticalMiles,
+  timeoutMs,
+}) {
+  const failures = [];
+  for (const provider of providers) {
+    const providerUrl = aircraftProviderUrl(
+      provider,
+      latitude,
+      longitude,
+      radiusNauticalMiles,
+    );
+    try {
+      const upstream = await fetchJson(fetchImpl, providerUrl, {
+        headers: providerHeaders(),
+        signal: requestSignal(timeoutMs),
+      });
+      if (!upstream.ok) {
+        failures.push({ provider: provider.name, status: upstream.status });
+        logAircraftProviderFailure(provider.name, upstream.status);
+        continue;
+      }
+      if (!isAircraftPositionPayload(upstream.data)) {
+        failures.push({ provider: provider.name, status: 502 });
+        logAircraftProviderFailure(provider.name, 502, "invalid_payload");
+        continue;
+      }
+      return { payload: upstream.data, provider: provider.name, failures };
+    } catch (error) {
+      failures.push({ provider: provider.name });
+      console.error(
+        JSON.stringify({
+          event: "provider_request_failed",
+          feature: "Aircraft data",
+          provider: provider.name,
+          message: cleanText(error?.message, 180) || "Unknown error",
+        }),
+      );
+    }
+  }
+  return { failures };
+}
+
 export function createFlightLaneServer({
   config,
   fetchImpl = globalThis.fetch,
@@ -405,23 +526,36 @@ export function createFlightLaneServer({
           config.aircraftCacheSeconds,
           async () => {
             const radiusNauticalMiles = roundedRadius / 1.150779;
-            const providerUrl =
-              `${config.aircraftBaseUrl}/point/${roundedLatitude}/` +
-              `${roundedLongitude}/${rounded(radiusNauticalMiles, 3)}`;
-            const upstream = await fetchJson(fetchImpl, providerUrl, {
-              headers: providerHeaders(),
-              signal: requestSignal(config.timeoutMs),
+            const result = await fetchAircraftPositionsFromProviders({
+              fetchImpl,
+              providers: config.aircraftProviders,
+              latitude: roundedLatitude,
+              longitude: roundedLongitude,
+              radiusNauticalMiles: rounded(radiusNauticalMiles, 3),
+              timeoutMs: config.timeoutMs,
             });
-            if (!upstream.ok) {
+            if (result.payload === undefined || !result.provider) {
+              const lastFailure = result.failures[result.failures.length - 1];
               const error = new Error("Aircraft data request failed.");
-              error.providerStatus = upstream.status;
+              error.providerStatus = lastFailure?.status || 502;
               throw error;
             }
-            return upstream.data;
+            if (result.failures.length > 0) {
+              console.warn(
+                JSON.stringify({
+                  event: "provider_fallback",
+                  feature: "Aircraft data",
+                  provider: result.provider,
+                  failedProviders: result.failures.map((failure) => failure.provider),
+                }),
+              );
+            }
+            return { payload: result.payload, provider: result.provider };
           },
         );
-        writeJson(response, 200, cached.value, {
+        writeJson(response, 200, cached.value.payload, {
           "X-FlightLane-Cache": cached.cacheStatus,
+          "X-FlightLane-Provider": cached.value.provider,
         });
         return;
       }

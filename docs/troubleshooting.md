@@ -46,6 +46,7 @@ npm run diagnose
 
 - Verify the selected radius in app settings.
 - Check that the live-aircraft provider covers the area.
+- If Airplanes.live is unavailable, the local service should try ADSB.lol and ADSB.fi automatically. Watch the `npm run api` terminal for `provider_fallback` messages.
 - Keep the app open through another refresh cycle.
 - Set `AIRCRAFT_CACHE_SECONDS` within your provider allowance. Longer values reduce upstream usage but delay authoritative corrections.
 - Use `npm run debug` and look for the sanitized nearby-provider HTTP status and raw/usable counts.

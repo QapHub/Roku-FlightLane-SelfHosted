@@ -28,6 +28,9 @@ try {
     $plainPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
     & curl.exe --fail-with-body --silent --show-error --digest --user "rokudev:$plainPassword" --form "mysubmit=Install" --form "archive=@$packagePath" --form "passwd=" "http://$rokuIp/plugin_install"
     if ($LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -eq 22) {
+            throw "Roku sideload was rejected. Confirm the Roku developer username is rokudev and re-enter the case-sensitive developer password shown/created in developer mode."
+        }
         throw "Roku sideload failed. Review the Roku installer response printed above."
     }
 }
