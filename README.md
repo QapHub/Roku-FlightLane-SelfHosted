@@ -41,8 +41,10 @@ All helper scripts are plain Node.js, so the same `npm run` commands work in mac
 3. Start the local service and leave this terminal open:
 
    ```sh
-   npm run api
+   npm run serve
    ```
+
+   `npm run serve` restarts the service automatically if it crashes or hangs. See [Starting and restarting the local service](#starting-and-restarting-the-local-service).
 
 4. Open a second terminal and install Flight Lane on the Roku:
 
@@ -54,6 +56,21 @@ All helper scripts are plain Node.js, so the same `npm run` commands work in mac
 
 5. Launch Flight Lane and enter the address to monitor. The resulting location is saved in the Roku app's local registry.
 
+## Starting and restarting the local service
+
+The Roku needs the local service running whenever Flight Lane is in use. Start it from the repository folder in one of two ways:
+
+| Command | Use when |
+| --- | --- |
+| `npm run serve` | **Recommended for everyday use.** Runs the service and restarts it automatically if it crashes, is killed, or stops answering its `/health` check (three missed checks, 20 seconds apart). Restarts back off from 1 to 60 seconds. |
+| `npm run api` | Runs the service directly, without automatic restarts. Useful while troubleshooting. |
+
+Leave that terminal open. To stop the service, press **Ctrl+C** in it (with `npm run serve`, this stops both the supervisor and the service).
+
+**Restart the service after any change to `.env.local` or after pulling new code:** press Ctrl+C, then run `npm run serve` (or `npm run api`) again. Settings that are compiled into the Roku app (`FLIGHTLANE_API_URL`, `RADIUS_MILES`, `REFRESH_SECONDS`, `SHOW_FLYOVER_COUNT`, `TRAIL_MINUTES`, `PROVIDER_POLL_SECONDS` defaults) also need `npm run deploy`, or `npm run build` and a manual upload of `dist/flight-lane.zip`.
+
+On a Mac, keep the computer awake while the service runs with `caffeinate -i npm run serve`. Check that everything is reachable with `npm run diagnose`.
+
 For the complete device steps, read [Roku setup and sideloading](docs/roku-setup.md). For data sources and usage limits, read [Provider setup](docs/provider-setup.md).
 
 ## Useful commands
@@ -61,7 +78,8 @@ For the complete device steps, read [Roku setup and sideloading](docs/roku-setup
 | Command | Purpose |
 | --- | --- |
 | `npm run setup` | Create `.env.local` and show possible computer LAN addresses |
-| `npm run api` | Start the local Flight Lane service |
+| `npm run serve` | Start the local Flight Lane service and restart it automatically on a crash or hang |
+| `npm run api` | Start the local Flight Lane service without automatic restarts |
 | `npm run build` | Create `dist/flight-lane.zip` |
 | `npm run deploy` | Build and sideload the main Roku app |
 | `npm run build:screensaver` | Create the standalone screensaver ZIP |
@@ -99,7 +117,7 @@ Never forward port `8787` from your router or expose it directly to the internet
 
 ## Provider usage
 
-The Roku can refresh its local display more often than the service calls a provider. `REFRESH_SECONDS` controls Roku-to-computer refreshes; `AIRCRAFT_CACHE_SECONDS` (default 2) sets how often the local service polls the live-aircraft provider while a Roku is active, which also sets how detailed the aircraft trails on the radar are.
+The Roku can refresh its local display more often than the service calls a provider. `REFRESH_SECONDS` controls Roku-to-computer refreshes; `PROVIDER_POLL_SECONDS` (default 5, also changeable in the app's settings) sets how often the local service polls the live-aircraft provider while a Roku is active, which also sets how detailed the aircraft trails on the radar are. `TRAIL_MINUTES` (default 5) sets how much flown track is drawn behind aircraft; 0 turns trails off.
 
 Flight Lane tries the configured live-aircraft provider (ADSB.lol by default) first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi. A provider that refuses requests is skipped for a while (30 seconds after rate limiting, 30 minutes after a 403) instead of being retried on every refresh. A 15-second cache makes at most 5,760 upstream calls during 24 hours of continuous use. See [Provider setup](docs/provider-setup.md) for each provider's limits before leaving the app running continuously.
 

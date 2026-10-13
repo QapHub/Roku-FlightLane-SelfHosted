@@ -119,6 +119,8 @@ sub OnSettingsResult(event as object)
             radiusMiles: ClampSettingsRadius(NumberOr(saved.radiusMiles, 4))
             idleMinutes: 0
             showFlyoverCount: saved.showFlyoverCount
+            trailMinutes: saved.trailMinutes
+            pollSeconds: saved.pollSeconds
         }
         BuildContent()
         m.settingsList.SetFocus(true)

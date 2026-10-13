@@ -519,7 +519,7 @@ test("track history keeps a thinned trail and derives the turn rate", () => {
 
   const trail = history.trail("a1b2c3");
   assert.ok(trail.length >= 6 && trail.length <= 30, `trail length ${trail.length}`);
-  assert.deepEqual(trail[trail.length - 1].length, 2);
+  assert.equal(trail[trail.length - 1].length, 3, "latitude, longitude, age");
   assert.ok(trail[0][0] < trail[trail.length - 1][0], "oldest point first");
   assert.equal(history.turnRate("A1B2C3"), 3);
 
@@ -569,4 +569,26 @@ test("nearby requests accept a radius up to 25 miles", async (context) => {
     fetch(`${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=${radius}`);
   assert.equal((await nearby(25)).status, 200);
   assert.equal((await nearby(26)).status, 400);
+});
+
+test("provider polling defaults to 5 seconds and honors the Roku's requested interval", async (context) => {
+  assert.equal(createConfig({}).aircraftCacheSeconds, 5);
+  assert.equal(createConfig({ PROVIDER_POLL_SECONDS: "10" }).aircraftCacheSeconds, 10);
+  assert.equal(createConfig({ AIRCRAFT_CACHE_SECONDS: "15" }).aircraftCacheSeconds, 15, "earlier name");
+
+  let calls = 0;
+  const server = createFlightLaneServer({
+    config: testConfig({ PROVIDER_POLL_SECONDS: "60" }),
+    fetchImpl: async () => {
+      calls += 1;
+      return Response.json({ ac: [], now: Date.now() });
+    },
+  });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  await fetch(
+    `${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=4&pollSeconds=1`,
+  );
+  await new Promise((resolve) => setTimeout(resolve, 2500));
+  assert.ok(calls >= 2, "polled at the requested 1-second interval, not the 60-second default");
 });

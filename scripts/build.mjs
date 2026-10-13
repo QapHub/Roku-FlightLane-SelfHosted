@@ -38,6 +38,12 @@ function gitBuildId() {
   return commit.stdout.trim() + (dirty ? "+" : "");
 }
 
+function closestOption(value, options) {
+  return options.reduce((best, option) =>
+    Math.abs(option - value) < Math.abs(best - value) ? option : best,
+  );
+}
+
 function brightScriptString(value) {
   return String(value).replaceAll('"', '""');
 }
@@ -66,6 +72,12 @@ export function buildPackage({ environmentFile = ".env.local", screenSaver = fal
 
   const hasLocation = false;
   const showFlyoverCount = !/^(0|false|no|off)$/i.test(String(config.SHOW_FLYOVER_COUNT ?? "true").trim());
+  // Defaults for the Roku settings screen; a choice saved on the Roku takes precedence.
+  const trailMinutes = closestOption(readNumber(config.TRAIL_MINUTES ?? "5", 5), [0, 1, 2, 5]);
+  const pollSeconds = closestOption(
+    readNumber(config.PROVIDER_POLL_SECONDS ?? config.AIRCRAFT_CACHE_SECONDS ?? "5", 5),
+    [2, 5, 10, 15, 30, 60],
+  );
   if (radiusMiles < 1 || radiusMiles > 25) {
     throw new Error("RADIUS_MILES must be from 1 to 25.");
   }
@@ -131,6 +143,8 @@ function GetAppConfig() as object
         flightLaneApiUrl: "${flightLaneApiUrl}"
         buildId: "${brightScriptString(gitBuildId())}"
         showFlyoverCount: ${showFlyoverCount}
+        trailMinutes: ${trailMinutes}
+        pollSeconds: ${pollSeconds}
     }
 end function
 `;

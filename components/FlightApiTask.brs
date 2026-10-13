@@ -91,6 +91,9 @@ function FetchNearbyAircraft(params as object) as object
     url = config.flightLaneApiUrl + "/v1/aircraft/nearby?latitude=" + config.homeLatitude.ToStr()
     url = url + "&longitude=" + config.homeLongitude.ToStr()
     url = url + "&radiusMiles=" + RoundTo(config.radiusMiles, 2).ToStr()
+    if IsNumericValue(params.pollSeconds)
+        url = url + "&pollSeconds=" + Int(params.pollSeconds).ToStr()
+    end if
 
     response = HttpRequest(url, AuthHeaders(params))
     data = ParseJsonBody(response.body)
@@ -251,9 +254,14 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
     if Type(rawAircraft.fl_trail) = "roArray"
         for each point in rawAircraft.fl_trail
             if Type(point) = "roArray" and point.Count() >= 2 and IsNumericValue(point[0]) and IsNumericValue(point[1])
+                ageSeconds = 0
+                if point.Count() >= 3
+                    ageSeconds = NumberOr(point[2], 0)
+                end if
                 trail.Push({
                     northMiles: (point[0] - config.homeLatitude) * 69.0
                     eastMiles: (point[1] - config.homeLongitude) * 69.172 * Cos(latitudeRadians)
+                    ageSeconds: ageSeconds
                 })
             end if
         end for

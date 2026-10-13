@@ -175,6 +175,32 @@ function AdvancePosition(eastMiles as float, northMiles as float, heading as flo
     return { eastMiles: east, northMiles: north, heading: currentHeading }
 end function
 
+' Trail length choices in minutes (0 = off) and provider polling choices in seconds.
+function TrailMinuteOptions() as object
+    return [0, 1, 2, 5]
+end function
+
+function PollSecondOptions() as object
+    return [2, 5, 10, 15, 30, 60]
+end function
+
+' Cycles to the next or previous value in options, wrapping around.
+function StepOption(options as object, current as float, direction as integer) as float
+    index = 0
+    for optionIndex = 0 to options.Count() - 1
+        if options[optionIndex] = current
+            index = optionIndex
+        end if
+    end for
+    index = index + direction
+    if index < 0
+        index = options.Count() - 1
+    else if index >= options.Count()
+        index = 0
+    end if
+    return options[index]
+end function
+
 ' Radius choices in settings: 1-mile steps to 10, then 15, 20, and 25 (the maximum).
 function RadiusOptions() as object
     return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25]

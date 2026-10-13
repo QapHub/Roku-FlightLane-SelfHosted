@@ -103,8 +103,8 @@
             <Label translation="[460,245]" width="1000" height="58" text="FLIGHT LANE SETTINGS" color="0xFFFFFFFF" horizAlign="center" />
             <Label translation="[505,330]" width="910" height="32" text="HOME LOCATION" color="0x7896B0FF" />
             <Label id="settingsAddressLabel" translation="[505,370]" width="910" height="72" wrap="true" numLines="2" color="0xDDF4FFFF" />
-            <LabelList id="settingsList" translation="[500,470]" itemSize="[920,64]" numRows="5" color="0xBED3E6FF" focusedColor="0xFFFFFFFF" />
-            <Label translation="[500,810]" width="920" height="80" wrap="true" numLines="2" text="Choose a setting below. Changes are saved automatically." color="0x7DD3FCFF" horizAlign="center" />
+            <LabelList id="settingsList" translation="[500,460]" itemSize="[920,56]" numRows="7" color="0xBED3E6FF" focusedColor="0xFFFFFFFF" />
+            <Label translation="[500,862]" width="920" height="70" wrap="true" numLines="2" text="Choose a setting below. Changes are saved automatically." color="0x7DD3FCFF" horizAlign="center" />
         </Group>
 
         <Rectangle translation="[0,1015]" width="1920" height="65" color="0x081725FF" />

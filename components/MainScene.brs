@@ -537,6 +537,8 @@ sub ApplyRuntimeSettings(settings as object)
         radiusMiles: radiusMiles
         idleMinutes: idleMinutes
         showFlyoverCount: showFlyoverCount
+        trailMinutes: NumberOr(settings.trailMinutes, NumberOr(m.config.trailMinutes, 5))
+        pollSeconds: NumberOr(settings.pollSeconds, NumberOr(m.config.pollSeconds, 5))
     }
     m.flyoverCountCaption.visible = showFlyoverCount
     m.flyoverCountLabel.visible = showFlyoverCount
@@ -639,7 +641,17 @@ function CloneSettings(settings as object) as object
         radiusMiles: settings.radiusMiles
         idleMinutes: settings.idleMinutes
         showFlyoverCount: settings.showFlyoverCount
+        trailMinutes: settings.trailMinutes
+        pollSeconds: settings.pollSeconds
     }
+end function
+
+function TrailLabel(minutes as dynamic) as string
+    value = NumberOr(minutes, 0)
+    if value <= 0
+        return "Off"
+    end if
+    return FormatSettingNumber(value) + " min"
 end function
 
 function OnOffLabel(value as dynamic) as string
@@ -691,6 +703,8 @@ sub BuildSettingsContent()
         "Detection radius: " + FormatSettingNumber(m.pendingSettings.radiusMiles) + " miles"
         "Idle display mode: " + idleLabel
         "24-hour flyover count: " + OnOffLabel(m.pendingSettings.showFlyoverCount)
+        "Aircraft trails: " + TrailLabel(m.pendingSettings.trailMinutes)
+        "Provider polling: every " + FormatSettingNumber(m.pendingSettings.pollSeconds) + " s"
         "Save and close"
     ]
     content = CreateObject("roSGNode", "ContentNode")
@@ -715,9 +729,9 @@ sub ActivateSettingsRow(index as integer)
         AdjustSettingsValue(1)
     else if index = 2
         AdjustSettingsValue(1)
-    else if index = 3
+    else if index >= 3 and index <= 5
         AdjustSettingsValue(1)
-    else if index = 4
+    else if index = 6
         m.statusLabel.text = "SAVING SETTINGS..."
         SaveRuntimeSettings(m.pendingSettings)
     end if
@@ -745,6 +759,10 @@ sub AdjustSettingsValue(direction as integer)
         m.pendingSettings.idleMinutes = idleOptions[selectedOption]
     else if index = 3
         m.pendingSettings.showFlyoverCount = m.pendingSettings.showFlyoverCount <> true
+    else if index = 4
+        m.pendingSettings.trailMinutes = StepOption(TrailMinuteOptions(), m.pendingSettings.trailMinutes, direction)
+    else if index = 5
+        m.pendingSettings.pollSeconds = StepOption(PollSecondOptions(), m.pendingSettings.pollSeconds, direction)
     else
         return
     end if
@@ -1117,6 +1135,7 @@ sub RefreshNearbyAircraft()
         homeLatitude: m.config.homeLatitude
         homeLongitude: m.config.homeLongitude
         radiusMiles: m.config.radiusMiles
+        pollSeconds: m.settings.pollSeconds
         requestRevision: m.locationRevision
     })
 end sub
@@ -2017,19 +2036,25 @@ end sub
 
 '
 ' Draws where the aircraft actually flew: its earlier reported positions joined to the latest
-' report, fading with age. The selected aircraft shows its full trail; others the last ~80s.
+' report, fading with age. The selected aircraft shows the trail length chosen in settings;
+' others show at most the last 80 seconds of it.
 sub DrawAircraftTrail(parent as object, aircraft as object, selected as boolean, center as float, scale as float)
-    if Type(aircraft.trail) <> "roArray" or aircraft.trail.Count() = 0
+    maxAgeSeconds = NumberOr(m.settings.trailMinutes, 5) * 60
+    if not selected and maxAgeSeconds > 80
+        maxAgeSeconds = 80
+    end if
+    if maxAgeSeconds <= 0 or Type(aircraft.trail) <> "roArray" or aircraft.trail.Count() = 0
         return
     end if
     points = []
-    first = 0
-    if not selected and aircraft.trail.Count() > 8
-        first = aircraft.trail.Count() - 8
-    end if
-    for index = first to aircraft.trail.Count() - 1
-        points.Push(aircraft.trail[index])
+    for each point in aircraft.trail
+        if NumberOr(point.ageSeconds, 0) <= maxAgeSeconds
+            points.Push(point)
+        end if
     end for
+    if points.Count() = 0
+        return
+    end if
     points.Push({ eastMiles: aircraft.eastMiles, northMiles: aircraft.northMiles })
 
     segmentCount = points.Count() - 1

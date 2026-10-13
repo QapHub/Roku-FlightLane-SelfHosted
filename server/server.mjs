@@ -205,14 +205,18 @@ function buildConfig(environment) {
     timeoutMs: numberSetting(environment, "PROVIDER_TIMEOUT_MS", 10000, 1000, 60000),
     aircraftBaseUrl,
     aircraftProviders: createAircraftProviders(aircraftBaseUrl),
-    // Minimum seconds between provider requests, and the background polling interval.
-    // ADSB.fi documents 1 request/second; ADSB.lol publishes no limit but throttles bursts.
+    // Default seconds between provider polls while a Roku is active; a Roku can request its
+    // own interval from settings. ADSB.fi allows 1 request/second; ADSB.lol throttles bursts.
+    // AIRCRAFT_CACHE_SECONDS is the earlier name for this setting.
     aircraftCacheSeconds: numberSetting(
-      environment,
-      "AIRCRAFT_CACHE_SECONDS",
-      2,
+      {
+        PROVIDER_POLL_SECONDS:
+          environment.PROVIDER_POLL_SECONDS ?? environment.AIRCRAFT_CACHE_SECONDS,
+      },
+      "PROVIDER_POLL_SECONDS",
+      5,
       1,
-      3600,
+      300,
     ),
     mapCacheSeconds: numberSetting(environment, "MAP_CACHE_SECONDS", 86400, 0, 604800),
     flightRoutesEnabled: booleanSetting(environment, "ENABLE_FLIGHT_ROUTES", true),
@@ -619,9 +623,10 @@ export class AircraftTrackHistory {
     }
   }
 
-  // Earlier positions, oldest first: about one every 10 seconds, plus any point where the
-  // track turned, so curves keep their shape. The newest position is the aircraft itself.
-  trail(id) {
+  // Earlier positions as [latitude, longitude, age in seconds], oldest first: about one every
+  // 10 seconds, plus any point where the track turned, so curves keep their shape. The newest
+  // position is the aircraft itself.
+  trail(id, now = Date.now()) {
     const points = this.tracks.get(String(id || "").toLowerCase()) || [];
     const selected = [];
     let anchor = points[points.length - 1];
@@ -632,7 +637,11 @@ export class AircraftTrackHistory {
         anchor.track !== undefined &&
         Math.abs(wrapDegrees(anchor.track - point.track)) >= TRAIL_TURN_DEGREES;
       if (anchor.time - point.time >= TRAIL_SPACING_MS || turned) {
-        selected.push([rounded(point.latitude, 5), rounded(point.longitude, 5)]);
+        selected.push([
+          rounded(point.latitude, 5),
+          rounded(point.longitude, 5),
+          Math.max(0, Math.round((now - point.time) / 1000)),
+        ]);
         anchor = point;
       }
     }
@@ -820,8 +829,9 @@ export function createFlightLaneServer({
     return { payload: result.payload, provider: result.provider };
   }
 
-  // Keeps track history dense between Roku refreshes by polling every
-  // AIRCRAFT_CACHE_SECONDS, but only for areas a Roku requested in the last two minutes.
+  // Keeps track history dense between Roku refreshes by polling each area at its interval
+  // (the Roku's setting, or PROVIDER_POLL_SECONDS), but only for areas a Roku requested in
+  // the last two minutes.
   function scheduleAircraftPolling() {
     if (pollTimer) return;
     pollTimer = setTimeout(async () => {
@@ -831,15 +841,17 @@ export function createFlightLaneServer({
           activeAreas.delete(key);
           continue;
         }
+        if (now - area.lastPolledAt < area.pollSeconds * 1000) continue;
+        area.lastPolledAt = now;
         try {
-          nearbyCache.set(key, await loadAircraftArea(area), config.aircraftCacheSeconds * 3);
+          nearbyCache.set(key, await loadAircraftArea(area), area.pollSeconds * 3);
         } catch {
           // Failures are logged by the provider fallback; the next Roku request retries.
         }
       }
       pollTimer = undefined;
       if (activeAreas.size > 0) scheduleAircraftPolling();
-    }, config.aircraftCacheSeconds * 1000);
+    }, 1000);
     pollTimer.unref?.();
   }
   const detailsCache = new TtlCache();
@@ -1096,13 +1108,26 @@ export function createFlightLaneServer({
         const roundedLongitude = rounded(longitude, 4);
         const roundedRadius = rounded(radiusMiles, 2);
         const cacheKey = `${roundedLatitude}/${roundedLongitude}/${roundedRadius}`;
+        const requestedPoll = url.searchParams.has("pollSeconds")
+          ? queryNumber(url, "pollSeconds")
+          : undefined;
+        const pollSeconds =
+          Number.isInteger(requestedPoll) && requestedPoll >= 1 && requestedPoll <= 300
+            ? requestedPoll
+            : config.aircraftCacheSeconds;
         const area = {
           latitude: roundedLatitude,
           longitude: roundedLongitude,
           radiusMiles: roundedRadius,
         };
-        activeAreas.set(cacheKey, { ...area, lastRequestedAt: Date.now() });
-        const cached = await nearbyCache.getOrLoad(cacheKey, config.aircraftCacheSeconds, () =>
+        const previous = activeAreas.get(cacheKey);
+        activeAreas.set(cacheKey, {
+          ...area,
+          pollSeconds,
+          lastRequestedAt: Date.now(),
+          lastPolledAt: previous?.lastPolledAt ?? Date.now(),
+        });
+        const cached = await nearbyCache.getOrLoad(cacheKey, pollSeconds, () =>
           loadAircraftArea(area),
         );
         scheduleAircraftPolling();

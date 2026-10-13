@@ -54,7 +54,7 @@ On first launch, the firewall may ask whether Node.js can accept incoming connec
 - **macOS:** select **Allow** when asked whether `node` may accept incoming network connections. If you dismissed the prompt, open **System Settings > Network > Firewall > Options** and set `node` to allow incoming connections. macOS may also ask for **Local Network** access for your terminal app; allow it so the deploy and debug helpers can reach the Roku (**System Settings > Privacy & Security > Local Network**).
 - **Windows:** allow Node.js on **Private networks** only.
 
-Leave the terminal open whenever Flight Lane is in use. To keep a Mac from sleeping while the service runs, start it with `caffeinate -i npm run api`.
+Leave the terminal open whenever Flight Lane is in use. For everyday use, start it with `npm run serve` instead, which restarts the service automatically if it crashes or hangs. To keep a Mac from sleeping while the service runs, start it with `caffeinate -i npm run serve`.
 
 Verify it locally:
 
@@ -93,6 +93,8 @@ On first launch, enter the location to monitor. Use the `*` button later to:
 - change the address;
 - select a radius from 1 through 25 miles (1-mile steps to 10, then 15, 20, and 25);
 - choose the idle display timeout;
+- choose how much flown track to draw behind aircraft (**Aircraft trails**: Off, 1, 2, or 5 minutes; default from `TRAIL_MINUTES`);
+- choose how often the local service polls the aircraft provider (**Provider polling**: every 2, 5, 10, 15, 30, or 60 seconds; default from `PROVIDER_POLL_SECONDS`);
 - show or hide the 24-hour flyover count in the header. Its default comes from `SHOW_FLYOVER_COUNT` in `.env.local` (on unless set to `false`); a choice made in settings is saved on the Roku and takes precedence.
 
 The live list and map show only aircraft inside the selected radar radius. The PIP follows the selected aircraft; choosing a plane manually keeps that selection until it disappears from the area.
