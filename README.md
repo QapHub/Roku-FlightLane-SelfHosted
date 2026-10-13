@@ -103,7 +103,7 @@ The Roku can refresh its local display more often than the service calls a provi
 
 Flight Lane tries the configured live-aircraft provider (ADSB.lol by default) first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi and then Airplanes.live. A 15-second cache makes at most 5,760 upstream calls during 24 hours of continuous use. See [Provider setup](docs/provider-setup.md) for each provider's limits before leaving the app running continuously.
 
-Every data provider Flight Lane uses is free and needs no account or key:
+Every data provider Flight Lane uses by default is free and needs no account or key:
 
 | Data | Provider |
 | --- | --- |
@@ -111,6 +111,7 @@ Every data provider Flight Lane uses is free and needs no account or key:
 | Satellite imagery | USDA / USGS The National Map (public domain, US coverage) |
 | Address lookup | US Census Bureau geocoder (US addresses) |
 | Flight routes (optional) | adsbdb.com |
+| Live flight status (optional, billed) | FlightAware AeroAPI, only if you add a key; manual selections only, capped per day |
 | Aircraft photos (optional) | Planespotters.net |
 
 The Roku shows which provider supplied the current aircraft positions and imagery below the radar, the route source with each route, and the photographer credit with each photo.
@@ -123,7 +124,7 @@ A Roku holds only one sideloaded development app at a time. Installing another d
 
 The street address is sent from the Roku to your computer and forwarded only to the US Census Bureau geocoder. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
 
-Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.fi or Airplanes.live. Map coordinates are sent to the USGS National Map. A selected callsign may be sent to adsbdb.com, and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
+Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.fi or Airplanes.live. Map coordinates are sent to the USGS National Map. A selected callsign may be sent to adsbdb.com (and, if you add a FlightAware key, a manually selected callsign to FlightAware), and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
 
 Flight Lane contains no analytics or advertising SDK. See [SECURITY.md](SECURITY.md) for security guidance.
 

@@ -26,6 +26,8 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
   },
 ];
 const FLIGHT_ROUTE_API = "https://api.adsbdb.com/v0/callsign";
+// Optional, billed per query. Used only for manually selected aircraft and capped per day.
+const FLIGHTAWARE_FLIGHTS_API = "https://aeroapi.flightaware.com/aeroapi/flights";
 const GEOCODING_API = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
 // Public-domain USDA/USGS orthoimagery from The National Map (United States coverage).
 const IMAGERY_EXPORT_API =
@@ -40,6 +42,36 @@ const MAP_CACHE_MAX_ENTRIES = 200;
 const MAX_REQUEST_BYTES = 16 * 1024;
 const CALLSIGN_PATTERN = /^[A-Z0-9][A-Z0-9_-]{1,15}$/;
 const REGISTRATION_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,15}$/;
+
+// Counts billed provider calls per UTC day and refuses calls past the limit.
+class DailyBudget {
+  constructor(limit) {
+    this.limit = limit;
+    this.day = "";
+    this.used = 0;
+    this.exhaustedLogged = false;
+  }
+
+  rollOver() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== this.day) {
+      this.day = today;
+      this.used = 0;
+      this.exhaustedLogged = false;
+    }
+  }
+
+  remaining() {
+    this.rollOver();
+    return Math.max(0, this.limit - this.used);
+  }
+
+  tryConsume() {
+    if (this.remaining() === 0) return false;
+    this.used += 1;
+    return true;
+  }
+}
 
 class TtlCache {
   constructor({ maxEntries = Infinity } = {}) {
@@ -161,6 +193,15 @@ export function createConfig(environment) {
     ),
     mapCacheSeconds: numberSetting(environment, "MAP_CACHE_SECONDS", 86400, 0, 604800),
     flightRoutesEnabled: booleanSetting(environment, "ENABLE_FLIGHT_ROUTES", true),
+    flightAwareKey: String(environment.FLIGHTAWARE_API_KEY || "").trim(),
+    flightAwareCacheSeconds: numberSetting(
+      environment,
+      "FLIGHTAWARE_CACHE_SECONDS",
+      86400,
+      900,
+      604800,
+    ),
+    flightAwareDailyLimit: numberSetting(environment, "FLIGHTAWARE_DAILY_LIMIT", 25, 0, 1000),
     flightDetailsCacheSeconds: numberSetting(
       environment,
       "FLIGHT_DETAILS_CACHE_SECONDS",
@@ -544,6 +585,62 @@ export function createFlightLaneServer({
   const detailsCache = new TtlCache();
   const geocodeCache = new TtlCache();
   const mapCache = new TtlCache({ maxEntries: MAP_CACHE_MAX_ENTRIES });
+  const flightAwareCache = new TtlCache();
+  const flightAwareBudget = new DailyBudget(config.flightAwareDailyLimit);
+
+  // Returns FlightAware live status for a callsign, or undefined to fall back to free routes.
+  async function lookupFlightAware(callsign) {
+    try {
+      const cached = await flightAwareCache.getOrLoad(
+        callsign,
+        config.flightAwareCacheSeconds,
+        async () => {
+          if (!flightAwareBudget.tryConsume()) {
+            if (!flightAwareBudget.exhaustedLogged) {
+              flightAwareBudget.exhaustedLogged = true;
+              console.error(
+                JSON.stringify({
+                  event: "flightaware_daily_limit_reached",
+                  limit: config.flightAwareDailyLimit,
+                }),
+              );
+            }
+            const error = new Error("FlightAware daily limit reached.");
+            error.budgetExhausted = true;
+            throw error;
+          }
+          const upstream = await fetchJson(
+            fetchImpl,
+            `${FLIGHTAWARE_FLIGHTS_API}/${encodeURIComponent(callsign)}?max_pages=1`,
+            {
+              headers: providerHeaders({ "x-apikey": config.flightAwareKey }),
+              signal: requestSignal(config.timeoutMs),
+            },
+          );
+          if (!upstream.ok) {
+            const error = new Error("FlightAware request failed.");
+            error.providerStatus = upstream.status;
+            throw error;
+          }
+          const flights = Array.isArray(upstream.data?.flights) ? upstream.data.flights : [];
+          return { flights, source: "FlightAware", liveStatus: true };
+        },
+      );
+      if (cached.value.flights.length === 0) return undefined;
+      return cached;
+    } catch (error) {
+      if (!error?.budgetExhausted) {
+        console.error(
+          JSON.stringify({
+            event: "provider_error",
+            feature: "Flight status",
+            providerStatus: Number.isInteger(error?.providerStatus) ? error.providerStatus : 0,
+          }),
+        );
+      }
+      return undefined;
+    }
+  }
   const photoCache = new TtlCache();
   const startedAt = Date.now();
 
@@ -573,6 +670,7 @@ export function createFlightLaneServer({
             satelliteMaps: true,
             addressLookup: true,
             flightDetails: config.flightRoutesEnabled,
+            liveFlightStatus: config.flightRoutesEnabled && Boolean(config.flightAwareKey),
             aircraftPhotos: config.aircraftPhotosEnabled,
           },
         });
@@ -669,6 +767,16 @@ export function createFlightLaneServer({
           writeJson(response, 200, { flights: [] });
           return;
         }
+        const manualSelection = url.searchParams.get("manual") === "1";
+        if (manualSelection && config.flightAwareKey) {
+          const live = await lookupFlightAware(callsign);
+          if (live) {
+            writeJson(response, 200, live.value, {
+              "X-FlightLane-Cache": live.cacheStatus,
+            });
+            return;
+          }
+        }
         const cached = await detailsCache.getOrLoad(
           callsign,
           config.flightDetailsCacheSeconds,
@@ -688,7 +796,9 @@ export function createFlightLaneServer({
             return normalizeFlightRoute(callsign, upstream.data);
           },
         );
-        writeJson(response, 200, cached.value, {
+        const liveStatusAvailable =
+          Boolean(config.flightAwareKey) && flightAwareBudget.remaining() > 0;
+        writeJson(response, 200, { ...cached.value, liveStatusAvailable }, {
           "X-FlightLane-Cache": cached.cacheStatus,
         });
         return;
@@ -864,7 +974,9 @@ export async function startServer({
   });
   console.log(`Flight Lane local service is listening on http://${config.host}:${config.port}`);
   console.log(
-    `Features: maps=usgs geocoding=census flightRoutes=${config.flightRoutesEnabled} photos=${
+    `Features: maps=usgs geocoding=census flightRoutes=${config.flightRoutesEnabled} flightAware=${
+      config.flightAwareKey ? `manual-only, ${config.flightAwareDailyLimit}/day` : "off"
+    } photos=${
       config.aircraftPhotosEnabled
     }`,
   );

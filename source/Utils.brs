@@ -2,6 +2,11 @@ function IsNonEmptyString(value as dynamic) as boolean
     valueType = Type(value)
     return (valueType = "roString" or valueType = "String") and value.Trim() <> ""
 end function
+function IsTrue(value as dynamic) as boolean
+    valueType = Type(value)
+    return (valueType = "roBoolean" or valueType = "Boolean") and value
+end function
+
 function IsNumericValue(value as dynamic) as boolean
     valueType = Type(value)
     return valueType = "roInt" or valueType = "Integer" or valueType = "roFloat" or valueType = "Float" or valueType = "roDouble" or valueType = "Double" or valueType = "roLongInteger" or valueType = "LongInteger"

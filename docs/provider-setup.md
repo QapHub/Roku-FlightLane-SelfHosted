@@ -47,7 +47,28 @@ ENABLE_FLIGHT_ROUTES=true
 FLIGHT_DETAILS_CACHE_SECONDS=86400
 ```
 
-These are the typical route for a flight number, not live flight status, so departure and arrival times are not available. Private and general-aviation callsigns usually have no route. Set `ENABLE_FLIGHT_ROUTES=false` to stop sending selected callsigns to adsbdb.com. The radar, altitude, speed, heading, phase, and projected motion still work from live position data.
+These are the typical route for a flight number, not live flight status, so departure and arrival times are not available. Private and general-aviation callsigns usually have no route. Set `ENABLE_FLIGHT_ROUTES=false` to stop all route lookups, including FlightAware. The radar, altitude, speed, heading, phase, and projected motion still work from live position data.
+
+### Optional: live status from FlightAware (billed)
+
+[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) adds live status and takeoff and landing times. **It is not free.** AeroAPI requires a billing account and charges per query; the Personal tier currently includes a small monthly usage credit (larger for ADS-B feeders), and usage beyond it is charged to your card. Check FlightAware's current pricing and terms before adding a key.
+
+```dotenv
+FLIGHTAWARE_API_KEY=your_aeroapi_key
+FLIGHTAWARE_CACHE_SECONDS=86400
+FLIGHTAWARE_DAILY_LIMIT=25
+```
+
+To keep charges predictable, the local service:
+
+- calls FlightAware only when you select an aircraft yourself; the automatically tracked closest aircraft always uses free adsbdb.com data;
+- asks once per aircraft, requests a single result page (`max_pages=1`), and caches each callsign for `FLIGHTAWARE_CACHE_SECONDS` (default 24 hours), including callsigns FlightAware does not know;
+- stops calling FlightAware after `FLIGHTAWARE_DAILY_LIMIT` calls per UTC day (default 25) and falls back to adsbdb.com, logging `flightaware_daily_limit_reached` once;
+- falls back to adsbdb.com whenever FlightAware fails or has no match.
+
+The daily count is kept in memory, so restarting the service resets it. The worst case is about `FLIGHTAWARE_DAILY_LIMIT × 31` billed calls per month, plus any made before restarts; size the limit so that fits within your credit, and set any usage alerts AeroAPI offers. A long cache can show an earlier flight's times if the same flight number flies again within the cache window.
+
+Treat the key like a password: it stays in `.env.local` on your computer, is never compiled into the Roku app, and should be rotated in the AeroAPI portal if it is ever disclosed.
 
 ## Aircraft photos
 

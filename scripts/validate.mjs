@@ -59,6 +59,9 @@ runMain(() => {
     "basemap.nationalmap.gov",
     "geocoding.geo.census.gov",
     "api.planespotters.net",
+    "aeroapi.flightaware.com",
+    "x-apikey",
+    "FLIGHTAWARE_API_KEY",
   ];
   for (const marker of providerMarkers) {
     if (packageText.includes(marker.toLowerCase())) {

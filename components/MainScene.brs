@@ -1532,6 +1532,7 @@ end sub
 sub ApplyCachedFlightDetails(aircraft as object)
     if m.detailCache.DoesExist(aircraft.id)
         ShowFlightDetails(m.detailCache[aircraft.id])
+        RequestSelectedFlightDetails()
         return
     end if
 
@@ -1555,7 +1556,7 @@ sub RequestSelectedFlightDetails()
         return
     end if
     aircraft = m.aircraft[m.selectedIndex]
-    if m.detailCache.DoesExist(aircraft.id)
+    if not NeedsFlightDetailLookup(aircraft)
         return
     end if
     if Left(aircraft.callsign, 8) = "Unknown "
@@ -1570,8 +1571,22 @@ sub RequestSelectedFlightDetails()
     m.detailTask = StartApiTask("flightDetails", {
         lookupKey: aircraft.id
         callsign: aircraft.callsign
+        manual: not m.autoTrackClosest
     })
 end sub
+
+' Free route data is fetched for any selection. Billed live status (FlightAware, when the
+' local service has a key) is requested only once per aircraft, and only when chosen manually.
+function NeedsFlightDetailLookup(aircraft as object) as boolean
+    if not m.detailCache.DoesExist(aircraft.id)
+        return true
+    end if
+    if m.autoTrackClosest
+        return false
+    end if
+    cached = m.detailCache[aircraft.id]
+    return IsTrue(cached.liveStatusAvailable) and not IsTrue(cached.liveStatus) and not IsTrue(cached.manualLookup)
+end function
 
 sub HandleFlightDetailsResult(result as object)
     lookupKey = StringOr(result.lookupKey, "")
@@ -1588,9 +1603,8 @@ sub HandleFlightDetailsResult(result as object)
         selected = m.aircraft[m.selectedIndex]
         if m.detailCache.DoesExist(selected.id)
             ShowFlightDetails(m.detailCache[selected.id])
-        else
-            RequestSelectedFlightDetails()
         end if
+        RequestSelectedFlightDetails()
     end if
 end sub
 
@@ -1610,6 +1624,9 @@ sub ShowFlightDetails(details as object)
     m.routeValue.text = details.origin + "  →  " + details.destination
     if details.status <> ""
         m.flightStatusValue.text = details.status
+        if IsNonEmptyString(details.source)
+            m.flightStatusValue.text = m.flightStatusValue.text + "  •  " + details.source
+        end if
     else
         m.flightStatusValue.text = "Typical route for this flight number"
         if IsNonEmptyString(details.source)

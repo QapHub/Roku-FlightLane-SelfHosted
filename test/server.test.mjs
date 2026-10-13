@@ -98,6 +98,7 @@ test("health reports free provider features and local registration", async (cont
     satelliteMaps: true,
     addressLookup: true,
     flightDetails: true,
+    liveFlightStatus: false,
     aircraftPhotos: true,
   });
 
@@ -296,4 +297,53 @@ test("flight routes come from adsbdb and unknown callsigns return no flights", a
   const unknown = await fetch(`${baseUrl}/v1/flights/N12345`);
   assert.equal(unknown.status, 200);
   assert.deepEqual((await unknown.json()).flights, []);
+});
+
+test("FlightAware is used only for manual selections, cached, and capped per day", async (context) => {
+  const requestedUrls = [];
+  const fetchImpl = async (url, options = {}) => {
+    requestedUrls.push(String(url));
+    if (String(url).startsWith("https://aeroapi.flightaware.com/")) {
+      assert.equal(options.headers["x-apikey"], "fa-test-secret");
+      return Response.json({
+        flights: [{ ident: "AAL100", status: "En Route / On Time", origin: { code_iata: "JFK" } }],
+      });
+    }
+    return Response.json({ response: "unknown callsign" }, { status: 404 });
+  };
+  const server = createFlightLaneServer({
+    config: testConfig({ FLIGHTAWARE_API_KEY: "fa-test-secret", FLIGHTAWARE_DAILY_LIMIT: "2" }),
+    fetchImpl,
+  });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  const lookup = async (callsign, manual) =>
+    (await fetch(`${baseUrl}/v1/flights/${callsign}${manual ? "?manual=1" : ""}`)).json();
+  const flightAwareCalls = () =>
+    requestedUrls.filter((url) => url.startsWith("https://aeroapi.flightaware.com/")).length;
+
+  const automatic = await lookup("AAL100", false);
+  assert.equal(flightAwareCalls(), 0);
+  assert.equal(automatic.liveStatusAvailable, true);
+
+  const manual = await lookup("AAL100", true);
+  assert.equal(manual.source, "FlightAware");
+  assert.equal(manual.liveStatus, true);
+  assert.equal(manual.flights[0].status, "En Route / On Time");
+  assert.equal(
+    requestedUrls.at(-1),
+    "https://aeroapi.flightaware.com/aeroapi/flights/AAL100?max_pages=1",
+  );
+
+  await lookup("AAL100", true);
+  assert.equal(flightAwareCalls(), 1, "a repeat lookup is served from cache");
+
+  await lookup("UAL1", true);
+  assert.equal(flightAwareCalls(), 2);
+
+  const overLimit = await lookup("DAL1", true);
+  assert.equal(flightAwareCalls(), 2, "the daily limit blocks further billed calls");
+  assert.equal(overLimit.liveStatus, undefined);
+  assert.equal(overLimit.liveStatusAvailable, false);
+  assert.equal(requestedUrls.at(-1), "https://api.adsbdb.com/v0/callsign/DAL1");
 });

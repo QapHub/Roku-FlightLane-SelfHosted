@@ -2,7 +2,7 @@
 
 ## Provider data
 
-Flight Lane uses only free providers that need no keys. Keep `.env.local` out of Git anyway; it holds your network addresses. The build writes only the local service URL to `source/config.generated.brs`, and that generated file is ignored as well.
+By default Flight Lane uses only free providers that need no keys. The one optional credential is `FLIGHTAWARE_API_KEY`, which is billed per query: keep it only in `.env.local` (ignored by Git), never paste it into issues or screenshots, and rotate it in the AeroAPI portal if it is disclosed. Keep `.env.local` out of Git in any case; it also holds your network addresses. The build writes only the local service URL to `source/config.generated.brs`, and that generated file is ignored as well.
 
 Before sharing a ZIP or commit, run:
 

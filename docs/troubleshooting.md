@@ -62,6 +62,7 @@ Small aircraft may not broadcast usable ADS-B positions, may be outside receiver
 - Confirm `ENABLE_FLIGHT_ROUTES` is not `false`. The local service health response should report `flightDetails: true`.
 - Routes come from adsbdb.com's callsign database. Private, general-aviation, charter, and new flight numbers often have no entry.
 - The route shown is the typical route for that flight number; a diverted or substituted flight can differ.
+- With a FlightAware key, live status appears only after you select an aircraft yourself. If it stops appearing, check the `npm run api` terminal for `flightaware_daily_limit_reached` or `"feature":"Flight status"` errors (a 401 or 403 usually means the key is wrong or billing is not set up).
 
 ## Another development app disappeared
 
