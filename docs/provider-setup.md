@@ -4,41 +4,25 @@ Provider products, allowances, prices, and license terms can change. Check each 
 
 ## Live aircraft positions
 
-Flight Lane defaults to the [Airplanes.live REST API](https://airplanes.live/api-guide/) point endpoint. No key is currently required for that endpoint. If the configured provider is blocked or temporarily unavailable, the local service falls back to ADSB.lol and then ADSB.fi.
+Flight Lane defaults to the [ADSB.lol API](https://api.adsb.lol/docs) point endpoint. ADSB.lol publishes its data under the Open Database License (ODbL) and needs no key; the Roku credits it under the radar whenever it supplies the positions shown. If the configured provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi and then Airplanes.live.
 
 Relevant `.env.local` settings:
 
 ```dotenv
-AIRCRAFT_API_BASE_URL=https://api.airplanes.live/v2
+AIRCRAFT_API_BASE_URL=https://api.adsb.lol/v2
 AIRCRAFT_CACHE_SECONDS=15
 ```
 
-`AIRCRAFT_CACHE_SECONDS` is the minimum time between upstream requests for the same rounded location and radius. Multiple local Roku refreshes during that window reuse the in-memory response.
+`AIRCRAFT_CACHE_SECONDS` is the minimum time between upstream requests for the same rounded location and radius. Multiple local Roku refreshes during that window reuse the in-memory response. At continuous use, the approximate maximum is `86,400 / AIRCRAFT_CACHE_SECONDS` upstream calls per day: 5,760 at the default 15 seconds, 2,880 at 30 seconds.
 
 Backup provider requests use the same rounded location, radius, timeout, and cache window. They are only tried after an earlier provider fails, so normal use still starts with your configured `AIRCRAFT_API_BASE_URL`.
 
-Airplanes.live currently lists:
+Provider limits differ:
 
-- a one-request-per-second REST limit;
-- 500 requests per day for free access;
-- 8,640 requests per day for contributor access.
+- ADSB.lol and ADSB.fi do not currently publish a fixed daily allowance, but may throttle heavy use. ADSB.fi asks for no more than one request per second.
+- Airplanes.live lists a one-request-per-second limit, 500 requests per day for free access, and 8,640 per day for contributor access. If you set it as your primary provider, use an `AIRCRAFT_CACHE_SECONDS` of 180 or more on free access.
 
-At continuous use, the approximate maximum is:
-
-```text
-86,400 / AIRCRAFT_CACHE_SECONDS
-```
-
-Examples:
-
-| Cache | Maximum upstream calls per day | Suggested use |
-| --- | ---: | --- |
-| 180 seconds | 480 | Fits the currently listed free daily allowance |
-| 30 seconds | 2,880 | Requires an access level that permits it |
-| 15 seconds | 5,760 | Smoother updates; requires suitable access |
-| 10 seconds | 8,640 | Matches the currently listed contributor allowance ceiling |
-
-The interface animates projected motion between responses, but a longer cache means less authoritative position correction. Do not set a shorter interval than your provider access permits.
+The interface animates projected motion between responses, but a longer cache means less authoritative position correction.
 
 ## Address lookup
 

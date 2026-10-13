@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(MODULE_DIR, "..");
 const DEFAULT_ENV_PATH = path.join(REPO_ROOT, ".env.local");
-const DEFAULT_AIRCRAFT_API = "https://api.airplanes.live/v2";
+const DEFAULT_AIRCRAFT_API = "https://api.adsb.lol/v2";
 const BACKUP_AIRCRAFT_PROVIDERS = [
   {
     name: "adsb.lol",
@@ -18,6 +18,11 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
     name: "adsb.fi",
     baseUrl: "https://opendata.adsb.fi/api/v3",
     pathStyle: "named",
+  },
+  {
+    name: "airplanes.live",
+    baseUrl: "https://api.airplanes.live/v2",
+    pathStyle: "positional",
   },
 ];
 const FLIGHT_ROUTE_API = "https://api.adsbdb.com/v0/callsign";
