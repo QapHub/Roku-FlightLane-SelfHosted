@@ -62,6 +62,7 @@ runMain(() => {
     "aeroapi.flightaware.com",
     "x-apikey",
     "FLIGHTAWARE_API_KEY",
+    "ROKU_DEVELOPER_PASSWORD",
   ];
   for (const marker of providerMarkers) {
     if (packageText.includes(marker.toLowerCase())) {

@@ -17,9 +17,15 @@ function curlConfigString(value) {
 runMain(async () => {
   const environmentFile = parseArgs()["env-file"] || ".env.local";
   const packagePath = buildPackage({ environmentFile });
-  const rokuIp = requireRokuIp(readEnvFile(resolveEnvPath(environmentFile)), environmentFile);
+  const config = readEnvFile(resolveEnvPath(environmentFile));
+  const rokuIp = requireRokuIp(config, environmentFile);
 
-  const password = await promptHidden("Roku developer password: ");
+  // Use a saved developer password when present; otherwise ask without echoing it.
+  const savedPassword = String(config.ROKU_DEVELOPER_PASSWORD ?? "");
+  const password = savedPassword || (await promptHidden("Roku developer password: "));
+  if (savedPassword) {
+    console.log(`Using the Roku developer password from ${environmentFile}.`);
+  }
 
   // Credentials go to curl on stdin so they never appear in the process list.
   const exitCode = await new Promise((resolve, reject) => {

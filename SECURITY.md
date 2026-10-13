@@ -25,7 +25,7 @@ The service defaults to `LOCAL_NETWORK_ONLY=true` and rejects source addresses o
 
 ## Roku developer password
 
-The deployment script prompts for the Roku developer password without echoing it to the terminal and passes it to `curl` on standard input, so it never appears in the process list. It never reads the password from `.env.local` or saves it. Do not add a password variable to the environment file.
+The deployment script prompts for the Roku developer password without echoing it to the terminal and passes it to `curl` on standard input, so it never appears in the process list. It never saves the password.
 
 ## Reporting a vulnerability
 
