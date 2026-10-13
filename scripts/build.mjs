@@ -66,8 +66,8 @@ export function buildPackage({ environmentFile = ".env.local", screenSaver = fal
 
   const hasLocation = false;
   const showFlyoverCount = !/^(0|false|no|off)$/i.test(String(config.SHOW_FLYOVER_COUNT ?? "true").trim());
-  if (radiusMiles < 1 || radiusMiles > 10) {
-    throw new Error("RADIUS_MILES must be from 1 to 10.");
+  if (radiusMiles < 1 || radiusMiles > 25) {
+    throw new Error("RADIUS_MILES must be from 1 to 25.");
   }
   if (refreshSeconds < 5) refreshSeconds = 5.0;
   if (!flightLaneApiUrl.trim()) {

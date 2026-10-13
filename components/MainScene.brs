@@ -491,7 +491,7 @@ sub HandleGeocodeResult(result as object)
 
     data = result.data
     if m.pendingSettings = invalid
-        defaultRadius = ClampNumber(m.config.radiusMiles, 1, 10)
+        defaultRadius = ClampNumber(m.config.radiusMiles, 1, MaxRadiusMiles())
         m.pendingSettings = {
             address: data.address
             latitude: data.latitude
@@ -520,7 +520,7 @@ sub ApplyRuntimeSettings(settings as object)
         return
     end if
 
-    radiusMiles = ClampNumber(NumberOr(settings.radiusMiles, 4), 1, 10)
+    radiusMiles = ClampNumber(NumberOr(settings.radiusMiles, 4), 1, MaxRadiusMiles())
     idleMinutes = NumberOr(settings.idleMinutes, 10)
     if idleMinutes < 0
         idleMinutes = 0
@@ -726,7 +726,7 @@ end sub
 sub AdjustSettingsValue(direction as integer)
     index = m.settingsList.itemFocused
     if index = 1
-        m.pendingSettings.radiusMiles = ClampNumber(m.pendingSettings.radiusMiles + direction, 1, 10)
+        m.pendingSettings.radiusMiles = StepRadius(m.pendingSettings.radiusMiles, direction, false)
     else if index = 2
         idleOptions = [0, 1, 5, 10, 15, 30, 60]
         selectedOption = 0

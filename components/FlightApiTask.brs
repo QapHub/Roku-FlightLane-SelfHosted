@@ -385,7 +385,7 @@ function EstimatePhase(onGround as boolean, altitudeFt as float, verticalRate as
 end function
 
 ' Closest approach to home along the projected path (curving with the current turn), sampled
-' every 10 seconds for up to 10 minutes.
+' every 20 seconds for up to 10 minutes.
 function ClosestApproach(eastMiles as float, northMiles as float, heading as float, speedKnots as float, turnRate as float, navHeading as float) as object
     startDistance = Sqr((eastMiles * eastMiles) + (northMiles * northMiles))
     if speedKnots <= 1
@@ -394,7 +394,7 @@ function ClosestApproach(eastMiles as float, northMiles as float, heading as flo
 
     bestDistance = startDistance
     bestSeconds = 0
-    for seconds = 10 to 600 step 10
+    for seconds = 20 to 600 step 20
         position = AdvancePosition(eastMiles, northMiles, heading, speedKnots, turnRate, navHeading, seconds)
         distance = Sqr((position.eastMiles * position.eastMiles) + (position.northMiles * position.northMiles))
         if distance < bestDistance

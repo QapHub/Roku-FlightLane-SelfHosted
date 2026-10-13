@@ -557,3 +557,16 @@ test("the service polls an active area in the background between Roku refreshes"
   const payload = await (await fetch(baseUrl + query)).json();
   assert.ok(payload.ac[0].fl_trail.length >= 1, "trail built from background polls");
 });
+
+test("nearby requests accept a radius up to 25 miles", async (context) => {
+  const server = createFlightLaneServer({
+    config: testConfig({ AIRCRAFT_CACHE_SECONDS: "30" }),
+    fetchImpl: async () => Response.json({ ac: [], now: Date.now() }),
+  });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  const nearby = (radius) =>
+    fetch(`${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=${radius}`);
+  assert.equal((await nearby(25)).status, 200);
+  assert.equal((await nearby(26)).status, 400);
+});

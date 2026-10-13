@@ -174,3 +174,38 @@ function AdvancePosition(eastMiles as float, northMiles as float, heading as flo
     end if
     return { eastMiles: east, northMiles: north, heading: currentHeading }
 end function
+
+' Radius choices in settings: 1-mile steps to 10, then 15, 20, and 25 (the maximum).
+function RadiusOptions() as object
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25]
+end function
+
+function MaxRadiusMiles() as float
+    return 25
+end function
+
+' Moves to the next or previous radius option; wraps around when wrap is true.
+function StepRadius(current as float, direction as integer, wrap as boolean) as float
+    options = RadiusOptions()
+    index = 0
+    for optionIndex = 0 to options.Count() - 1
+        if options[optionIndex] <= current
+            index = optionIndex
+        end if
+    end for
+    index = index + direction
+    if index < 0
+        if wrap
+            index = options.Count() - 1
+        else
+            index = 0
+        end if
+    else if index >= options.Count()
+        if wrap
+            index = 0
+        else
+            index = options.Count() - 1
+        end if
+    end if
+    return options[index]
+end function

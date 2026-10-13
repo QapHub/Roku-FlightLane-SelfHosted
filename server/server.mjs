@@ -1083,11 +1083,11 @@ export function createFlightLaneServer({
           longitude < -180 ||
           longitude > 180 ||
           radiusMiles < 1 ||
-          radiusMiles > 10
+          radiusMiles > 25
         ) {
           writeJson(response, 400, {
             ok: false,
-            error: "Valid coordinates and a radius from 1 to 10 miles are required.",
+            error: "Valid coordinates and a radius from 1 to 25 miles are required.",
           });
           return;
         }

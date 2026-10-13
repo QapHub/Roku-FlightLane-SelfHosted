@@ -91,7 +91,7 @@ The app should launch immediately and appear as a development app on the Roku ho
 On first launch, enter the location to monitor. Use the `*` button later to:
 
 - change the address;
-- select a radius from 1 through 10 miles;
+- select a radius from 1 through 25 miles (1-mile steps to 10, then 15, 20, and 25);
 - choose the idle display timeout;
 - show or hide the 24-hour flyover count in the header. Its default comes from `SHOW_FLYOVER_COUNT` in `.env.local` (on unless set to `false`); a choice made in settings is saved on the Roku and takes precedence.
 
