@@ -55,11 +55,13 @@ These are the typical route for a flight number, not live flight status, so depa
 
 ```dotenv
 FLIGHTAWARE_API_KEY=your_aeroapi_key
-FLIGHTAWARE_CACHE_TTL=1440
-FLIGHTAWARE_DAILY_LIMIT=25
 FLIGHTAWARE_API_SPEND_WARNING=5
 FLIGHTAWARE_API_SPEND_LIMIT=10
+FLIGHTAWARE_CACHE_TTL=1440
+FLIGHTAWARE_DAILY_LIMIT=500
 ```
+
+The values shown are the defaults. With a key, FlightAware is the preferred route source for every selected aircraft, including the automatically tracked closest one, until the monthly spend limit is reached.
 
 **Without a key, nothing is sent to FlightAware.** The service makes no AeroAPI requests of any kind, including usage checks, and the Roku shows no FlightAware notice.
 
@@ -68,16 +70,18 @@ With a key, the local service makes two kinds of AeroAPI request:
 | Request | Billed | When |
 | --- | --- | --- |
 | `GET /account/usage?start=<first of this month>&all_keys=true` | No (FlightAware documents it as free) | At most every 10 minutes while the app is refreshing, and before a billed lookup if the last reading is 10 minutes old |
-| `GET /flights/<callsign>?max_pages=1` | Yes | Only when you select an aircraft yourself and every check below passes |
+| `GET /flights/<callsign>?max_pages=1` | Yes | For each newly selected aircraft (automatic or manual) whose callsign is not cached, when every check below passes |
 
 Before each billed lookup, the service checks, in order:
 
 1. **Cache:** each callsign's result is reused for `FLIGHTAWARE_CACHE_TTL` minutes (default 1440, 24 hours), including callsigns FlightAware does not know.
 2. **Monthly spend:** month-to-date spend comes from `total_cost` in the usage response, covering every key on your account, before volume discounts. FlightAware updates it every 10 minutes, so the service adds calls made since the last reading at your account's average cost per result page. The Roku shows the spend above **FLIGHT PHASE**, for example `FlightAware API: $5.40 of $10`. It turns amber at `FLIGHTAWARE_API_SPEND_WARNING` (default $5). At `FLIGHTAWARE_API_SPEND_LIMIT` (default $10) it turns red and reads `· paused`, and billed lookups stop until next month.
 3. **Spend known:** if usage cannot be read for 30 minutes (wrong key, outage), billed lookups pause rather than risk unmonitored charges.
-4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 25), as a backstop between usage readings.
+4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 500), as a backstop against bursts between 10-minute usage readings.
 
-Whenever FlightAware is skipped, fails, or has no match, the route comes from free adsbdb.com data. The automatically tracked closest aircraft always uses adsbdb.com.
+Whenever FlightAware is skipped, fails, or has no match, the route comes from free adsbdb.com data.
+
+Expect spend to scale with how often the selected aircraft changes. Near a busy airport, automatic tracking can select a new aircraft every minute or two, which is several hundred billed lookups a day; the default $10 limit then stops FlightAware within days, after which routes continue from adsbdb.com until the next month.
 
 The spend limit is a safeguard, not a guarantee: FlightAware's figure can lag, and calls in flight when the limit is crossed still complete. Set it below what you are willing to pay, and set any usage alerts AeroAPI offers. The daily count is kept in memory, so restarting the service resets it. A long cache can show an earlier flight's times if the same flight number flies again within the cache window.
 

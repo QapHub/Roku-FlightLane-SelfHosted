@@ -23,7 +23,7 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
 // After a refusal, skip a provider for a while instead of retrying it on every refresh.
 const PROVIDER_COOLDOWN_MS = { rateLimited: 30 * 1000, forbidden: 30 * 60 * 1000, failed: 30 * 1000 };
 const FLIGHT_ROUTE_API = "https://api.adsbdb.com/v0/callsign";
-// Optional, billed per query. Used only for manually selected aircraft and capped per day.
+// Optional, billed per query. Preferred for routes when a key is set, until the spend limit.
 const FLIGHTAWARE_FLIGHTS_API = "https://aeroapi.flightaware.com/aeroapi/flights";
 // Free to call. FlightAware refreshes account usage data every 10 minutes.
 const FLIGHTAWARE_USAGE_API = "https://aeroapi.flightaware.com/aeroapi/account/usage";
@@ -209,7 +209,7 @@ function buildConfig(environment) {
     flightAwareKey: String(environment.FLIGHTAWARE_API_KEY || "").trim(),
     flightAwareCacheSeconds:
       numberSetting(environment, "FLIGHTAWARE_CACHE_TTL", 1440, 15, 10080) * 60,
-    flightAwareDailyLimit: numberSetting(environment, "FLIGHTAWARE_DAILY_LIMIT", 25, 0, 1000),
+    flightAwareDailyLimit: numberSetting(environment, "FLIGHTAWARE_DAILY_LIMIT", 500, 0, 10000),
     flightAwareSpendWarning: numberSetting(
       environment,
       "FLIGHTAWARE_API_SPEND_WARNING",
@@ -738,10 +738,6 @@ export function createFlightLaneServer({
     };
   }
 
-  function flightAwareCallsAllowed() {
-    const { state } = flightAwareSpendStatus();
-    return (state === "ok" || state === "warning") && flightAwareBudget.remaining() > 0;
-  }
 
   // Returns FlightAware live status for a callsign, or undefined to fall back to free routes.
   async function lookupFlightAware(callsign) {
@@ -936,8 +932,7 @@ export function createFlightLaneServer({
           writeJson(response, 200, { flights: [] });
           return;
         }
-        const manualSelection = url.searchParams.get("manual") === "1";
-        if (manualSelection && config.flightAwareKey) {
+        if (config.flightAwareKey) {
           const live = await lookupFlightAware(callsign);
           if (live) {
             writeJson(response, 200, live.value, {
@@ -965,9 +960,7 @@ export function createFlightLaneServer({
             return normalizeFlightRoute(callsign, upstream.data);
           },
         );
-        refreshFlightAwareSpendIfDue();
-        const liveStatusAvailable = Boolean(config.flightAwareKey) && flightAwareCallsAllowed();
-        writeJson(response, 200, { ...cached.value, liveStatusAvailable }, {
+        writeJson(response, 200, cached.value, {
           "X-FlightLane-Cache": cached.cacheStatus,
         });
         return;
@@ -1145,7 +1138,7 @@ export async function startServer({
   console.log(
     `Features: maps=usgs geocoding=census flightRoutes=${config.flightRoutesEnabled} flightAware=${
       config.flightAwareKey
-        ? `manual-only, ${config.flightAwareDailyLimit}/day, warn $${config.flightAwareSpendWarning}, limit $${config.flightAwareSpendLimit}`
+        ? `preferred, warn $${config.flightAwareSpendWarning}, limit $${config.flightAwareSpendLimit}, ${config.flightAwareDailyLimit}/day`
         : "off"
     } photos=${
       config.aircraftPhotosEnabled

@@ -405,15 +405,11 @@ function FetchFlightDetails(params as object) as object
     config = GetAppConfig()
     lookupKey = StringOr(params.lookupKey, "")
     callsign = StringOr(params.callsign, "")
-    manualLookup = IsTrue(params.manual)
     if config.flightLaneApiUrl = "" or callsign = ""
         return SuccessResult("flightDetails", { lookupKey: lookupKey, available: false })
     end if
 
     url = config.flightLaneApiUrl + "/v1/flights/" + UrlEncode(callsign)
-    if manualLookup
-        url = url + "?manual=1"
-    end if
     response = HttpRequest(url, AuthHeaders(params))
     print "Flight Lane debug: route lookup for "; callsign; " HTTP "; response.code
     data = ParseJsonBody(response.body)
@@ -424,12 +420,7 @@ function FetchFlightDetails(params as object) as object
     end if
 
     if data.flights = invalid or data.flights.Count() = 0
-        return SuccessResult("flightDetails", {
-            lookupKey: lookupKey
-            available: false
-            manualLookup: manualLookup
-            liveStatusAvailable: IsTrue(data.liveStatusAvailable)
-        })
+        return SuccessResult("flightDetails", { lookupKey: lookupKey, available: false })
     end if
 
     selectedFlight = data.flights[0]
@@ -457,9 +448,6 @@ function FetchFlightDetails(params as object) as object
         actualOn: StringOr(selectedFlight.actual_on, "")
         routeDistanceMiles: NumberOr(selectedFlight.route_distance, 0)
         source: StringOr(data.source, "")
-        liveStatus: IsTrue(data.liveStatus)
-        liveStatusAvailable: IsTrue(data.liveStatusAvailable)
-        manualLookup: manualLookup
     })
 end function
 

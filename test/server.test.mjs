@@ -343,8 +343,7 @@ async function flightAwareServer(context, overrides, fetchOptions) {
   });
   context.after(() => server.close());
   const baseUrl = await listen(server);
-  const lookup = async (callsign, manual) =>
-    (await fetch(`${baseUrl}/v1/flights/${callsign}${manual ? "?manual=1" : ""}`)).json();
+  const lookup = async (callsign) => (await fetch(`${baseUrl}/v1/flights/${callsign}`)).json();
   return { ...fake, baseUrl, lookup };
 }
 
@@ -354,49 +353,41 @@ test("without a FlightAware key the service never contacts AeroAPI", async (cont
   context.after(() => server.close());
   const baseUrl = await listen(server);
 
-  const route = await (await fetch(`${baseUrl}/v1/flights/AAL100?manual=1`)).json();
+  const route = await (await fetch(`${baseUrl}/v1/flights/AAL100`)).json();
   const nearby = await (
     await fetch(`${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=4`)
   ).json();
   const health = await (await fetch(`${baseUrl}/health`)).json();
 
-  assert.equal(route.liveStatusAvailable, false);
+  assert.equal(route.source, undefined);
   assert.equal(nearby.flightAware, undefined);
   assert.equal(health.flightAwareSpend, undefined);
   assert.equal(fake.requestedUrls.some((url) => url.includes("flightaware")), false);
 });
 
-test("FlightAware is used only for manual selections, cached, and capped per day", async (context) => {
+test("FlightAware is preferred when a key is set, cached, and capped per day", async (context) => {
   const { lookup, requestedUrls, billedCalls } = await flightAwareServer(context, {
     FLIGHTAWARE_DAILY_LIMIT: "2",
   });
 
-  const automatic = await lookup("AAL100", false);
-  assert.equal(billedCalls(), 0);
-  // Wait for the background usage check started by the automatic lookup.
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  assert.equal((await lookup("AAL100", false)).liveStatusAvailable, true);
-  assert.equal(automatic.source, undefined);
-
-  const manual = await lookup("AAL100", true);
-  assert.equal(manual.source, "FlightAware");
-  assert.equal(manual.liveStatus, true);
-  assert.equal(manual.flights[0].status, "En Route / On Time");
+  const first = await lookup("AAL100");
+  assert.equal(first.source, "FlightAware");
+  assert.equal(first.liveStatus, true);
+  assert.equal(first.flights[0].status, "En Route / On Time");
   assert.equal(
     requestedUrls.at(-1),
     "https://aeroapi.flightaware.com/aeroapi/flights/AAL100?max_pages=1",
   );
 
-  await lookup("AAL100", true);
+  await lookup("AAL100");
   assert.equal(billedCalls(), 1, "a repeat lookup is served from cache");
 
-  await lookup("UAL1", true);
+  await lookup("UAL1");
   assert.equal(billedCalls(), 2);
 
-  const overLimit = await lookup("DAL1", true);
+  const overLimit = await lookup("DAL1");
   assert.equal(billedCalls(), 2, "the daily limit blocks further billed calls");
   assert.equal(overLimit.liveStatus, undefined);
-  assert.equal(overLimit.liveStatusAvailable, false);
   assert.equal(requestedUrls.at(-1), "https://api.adsbdb.com/v0/callsign/DAL1");
 });
 
@@ -406,7 +397,7 @@ test("FlightAware usage is read for this month and reported to the Roku", async 
     {},
     { totalCost: 5.5 },
   );
-  await lookup("AAL100", true);
+  await lookup("AAL100");
   const usageUrl = new URL(requestedUrls.find((url) => url.includes("/account/usage")));
   assert.equal(usageUrl.searchParams.get("start"), `${new Date().toISOString().slice(0, 7)}-01`);
   assert.equal(usageUrl.searchParams.get("all_keys"), "true");
@@ -425,13 +416,12 @@ test("FlightAware usage is read for this month and reported to the Roku", async 
 
 test("FlightAware calls stop at the spend limit or when usage cannot be read", async (context) => {
   const overLimit = await flightAwareServer(context, {}, { totalCost: 10.01 });
-  const limited = await overLimit.lookup("AAL100", true);
+  const limited = await overLimit.lookup("AAL100");
   assert.equal(overLimit.billedCalls(), 0);
-  assert.equal(limited.source, undefined);
-  assert.equal(limited.liveStatusAvailable, false);
+  assert.equal(limited.source, undefined, "routes fall back to adsbdb.com at the spend limit");
 
   const unreadable = await flightAwareServer(context, {}, { usageStatus: 401 });
-  await unreadable.lookup("AAL100", true);
+  await unreadable.lookup("AAL100");
   assert.equal(unreadable.billedCalls(), 0, "billed calls pause when spend is unknown");
 
   assert.throws(
