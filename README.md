@@ -15,7 +15,7 @@ This repository is the self-hosted edition. A small service runs on a computer i
 - [Node.js 20 or newer](https://nodejs.org/en/download)
 - A free [Roku developer account](https://developer.roku.com/)
 - Roku developer mode enabled
-- A Google Maps Platform project with Maps Static API and Geocoding API enabled
+- A Google Maps Platform project with Maps Static API enabled (for satellite maps; address lookup uses the free US Census geocoder by default)
 - Optional: a FlightAware AeroAPI key for origin, destination, and status enrichment
 
 All helper scripts are plain Node.js, so the same `npm run` commands work in macOS Terminal, Windows PowerShell, and Linux shells. Deployment also uses `curl`, which is built into macOS and Windows 10/11.
@@ -37,7 +37,6 @@ All helper scripts are plain Node.js, so the same `npm run` commands work in mac
    FLIGHTLANE_API_URL=http://YOUR_COMPUTER_LAN_IP:8787
    ROKU_DEVICE_IP=YOUR_ROKU_IP
    GOOGLE_MAPS_API_KEY=your_key
-   GOOGLE_GEOCODING_API_KEY=your_key
    FLIGHTAWARE_API_KEY=optional_key
    ```
 
@@ -116,7 +115,7 @@ A Roku holds only one sideloaded development app at a time. Installing another d
 
 ## Privacy
 
-The street address is sent from the Roku to your computer and forwarded to Google only for geocoding. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
+The street address is sent from the Roku to your computer and forwarded only for geocoding: to the US Census Bureau geocoder by default, or to Google when `GEOCODING_PROVIDER=google` or a Google geocoding key is configured. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
 
 Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.lol or ADSB.fi. Map coordinates are sent to Google. A selected callsign may be sent to FlightAware, and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
 

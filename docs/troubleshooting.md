@@ -36,10 +36,9 @@ npm run diagnose
 
 ## Address lookup fails
 
-- Enable the Google Geocoding API and billing.
-- Confirm the API restriction permits Geocoding API.
+- The default Census geocoder matches US street addresses only. Include street, city, state, and ZIP code.
+- For addresses Census cannot match, set `GOOGLE_GEOCODING_API_KEY` (or `GEOCODING_PROVIDER=google`), enable the Google Geocoding API and billing, and confirm the key's API restriction permits it.
 - Check the local service health response: `addressLookup` should be `true`.
-- Include street, city, state, and ZIP code.
 
 ## Satellite map is blank
 

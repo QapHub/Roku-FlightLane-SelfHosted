@@ -22,19 +22,24 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
 ];
 const FLIGHT_DETAILS_API = "https://aeroapi.flightaware.com/aeroapi";
 const GEOCODING_API = "https://maps.googleapis.com/maps/api/geocode/json";
+const CENSUS_GEOCODING_API =
+  "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
+const GEOCODING_PROVIDERS = ["auto", "census", "google"];
 const STATIC_MAP_API = "https://maps.googleapis.com/maps/api/staticmap";
 const AIRCRAFT_PHOTO_API = "https://api.planespotters.net/pub/photos/reg";
 const USER_AGENT = "FlightLaneSelfHosted/1.0";
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_MAP_BYTES = 8 * 1024 * 1024;
+const MAP_CACHE_MAX_ENTRIES = 200;
 const MAX_REQUEST_BYTES = 16 * 1024;
 const CALLSIGN_PATTERN = /^[A-Z0-9][A-Z0-9_-]{1,15}$/;
 const REGISTRATION_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,15}$/;
 
 class TtlCache {
-  constructor() {
+  constructor({ maxEntries = Infinity } = {}) {
     this.values = new Map();
     this.pending = new Map();
+    this.maxEntries = maxEntries;
   }
 
   get(key) {
@@ -48,10 +53,14 @@ class TtlCache {
   }
 
   set(key, value, ttlSeconds) {
+    this.values.delete(key);
     this.values.set(key, {
       expiresAt: Date.now() + Math.max(0, ttlSeconds) * 1000,
       value,
     });
+    while (this.values.size > this.maxEntries) {
+      this.values.delete(this.values.keys().next().value);
+    }
   }
 
   async getOrLoad(key, ttlSeconds, loader) {
@@ -66,7 +75,11 @@ class TtlCache {
 
     try {
       const value = await pending;
-      this.set(key, value, ttlSeconds);
+      this.set(
+        key,
+        value,
+        typeof ttlSeconds === "function" ? ttlSeconds(value) : ttlSeconds,
+      );
       return { cacheStatus: "miss", value };
     } finally {
       this.pending.delete(key);
@@ -123,7 +136,21 @@ function booleanSetting(environment, name, fallback) {
 
 export function createConfig(environment) {
   const mapsKey = String(environment.GOOGLE_MAPS_API_KEY || "").trim();
-  const geocodingKey = String(environment.GOOGLE_GEOCODING_API_KEY || mapsKey).trim();
+  const explicitGeocodingKey = String(environment.GOOGLE_GEOCODING_API_KEY || "").trim();
+  const requestedGeocodingProvider = String(environment.GEOCODING_PROVIDER || "auto")
+    .trim()
+    .toLowerCase();
+  if (!GEOCODING_PROVIDERS.includes(requestedGeocodingProvider)) {
+    throw new Error(`GEOCODING_PROVIDER must be one of: ${GEOCODING_PROVIDERS.join(", ")}.`);
+  }
+  // "auto" uses the free US Census geocoder unless a dedicated Google key is configured.
+  const geocodingProvider =
+    requestedGeocodingProvider === "auto"
+      ? explicitGeocodingKey
+        ? "google"
+        : "census"
+      : requestedGeocodingProvider;
+  const geocodingKey = geocodingProvider === "google" ? explicitGeocodingKey || mapsKey : "";
   const aircraftBaseUrl = String(
     environment.AIRCRAFT_API_BASE_URL || DEFAULT_AIRCRAFT_API,
   ).replace(/\/+$/, "");
@@ -147,6 +174,8 @@ export function createConfig(environment) {
       3600,
     ),
     mapsKey,
+    mapCacheSeconds: numberSetting(environment, "MAP_CACHE_SECONDS", 86400, 0, 604800),
+    geocodingProvider,
     geocodingKey,
     flightAwareKey: String(environment.FLIGHTAWARE_API_KEY || "").trim(),
     flightDetailsCacheSeconds: numberSetting(
@@ -442,6 +471,51 @@ export async function fetchAircraftPositionsFromProviders({
   return { failures };
 }
 
+function geocodingAvailable(config) {
+  return config.geocodingProvider === "census" || Boolean(config.geocodingKey);
+}
+
+// Honors a provider's Cache-Control so cached images never outlive what it allows.
+function providerMaxAgeSeconds(cacheControl) {
+  const directives = String(cacheControl || "").toLowerCase();
+  if (/(^|[\s,])(no-store|no-cache|private)([\s,=]|$)/.test(directives)) return 0;
+  const maxAge = directives.match(/(?:^|[\s,])max-age=(\d+)/);
+  return maxAge ? Number(maxAge[1]) : Infinity;
+}
+
+// Returns a Census match in the Google Geocoding response shape the Roku app parses.
+async function geocodeWithCensus(fetchImpl, config, address) {
+  const providerUrl = new URL(CENSUS_GEOCODING_API);
+  providerUrl.searchParams.set("address", address);
+  providerUrl.searchParams.set("benchmark", "Public_AR_Current");
+  providerUrl.searchParams.set("format", "json");
+  const upstream = await fetchJson(fetchImpl, providerUrl, {
+    headers: providerHeaders(),
+    signal: requestSignal(config.timeoutMs),
+  });
+  if (!upstream.ok) {
+    const error = new Error("Address lookup request failed.");
+    error.providerStatus = upstream.status;
+    error.feature = "Address lookup";
+    throw error;
+  }
+  const match = upstream.data?.result?.addressMatches?.[0];
+  const latitude = Number(match?.coordinates?.y);
+  const longitude = Number(match?.coordinates?.x);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return { status: "ZERO_RESULTS", results: [] };
+  }
+  return {
+    status: "OK",
+    results: [
+      {
+        formatted_address: cleanText(match.matchedAddress, 200) || address,
+        geometry: { location: { lat: latitude, lng: longitude } },
+      },
+    ],
+  };
+}
+
 export function createFlightLaneServer({
   config,
   fetchImpl = globalThis.fetch,
@@ -450,6 +524,7 @@ export function createFlightLaneServer({
   const nearbyCache = new TtlCache();
   const detailsCache = new TtlCache();
   const geocodeCache = new TtlCache();
+  const mapCache = new TtlCache({ maxEntries: MAP_CACHE_MAX_ENTRIES });
   const photoCache = new TtlCache();
   const startedAt = Date.now();
 
@@ -477,7 +552,7 @@ export function createFlightLaneServer({
           features: {
             liveAircraft: true,
             satelliteMaps: Boolean(config.mapsKey),
-            addressLookup: Boolean(config.geocodingKey),
+            addressLookup: geocodingAvailable(config),
             flightDetails: Boolean(config.flightAwareKey),
             aircraftPhotos: config.aircraftPhotosEnabled,
           },
@@ -597,11 +672,11 @@ export function createFlightLaneServer({
       }
 
       if (method === "POST" && url.pathname === "/v1/geocode") {
-        if (!config.geocodingKey) {
+        if (!geocodingAvailable(config)) {
           writeJson(response, 503, {
             ok: false,
             error:
-              "Address lookup is not configured. Add a Google Geocoding API key to .env.local.",
+              "Address lookup is not configured. Add a Google Geocoding API key to .env.local or set GEOCODING_PROVIDER=census.",
           });
           return;
         }
@@ -616,6 +691,9 @@ export function createFlightLaneServer({
         }
         const cacheKey = address.toLowerCase();
         const cached = await geocodeCache.getOrLoad(cacheKey, 86400, async () => {
+          if (config.geocodingProvider === "census") {
+            return geocodeWithCensus(fetchImpl, config, address);
+          }
           const providerUrl = new URL(GEOCODING_API);
           providerUrl.searchParams.set("address", address);
           providerUrl.searchParams.set("key", config.geocodingKey);
@@ -671,38 +749,50 @@ export function createFlightLaneServer({
           return;
         }
 
-        const providerUrl = new URL(STATIC_MAP_API);
-        providerUrl.searchParams.set(
-          "center",
-          `${rounded(latitude, 5)},${rounded(longitude, 5)}`,
-        );
-        providerUrl.searchParams.set("zoom", String(zoom));
-        providerUrl.searchParams.set("size", `${logicalSize}x${logicalSize}`);
-        providerUrl.searchParams.set("scale", "2");
-        providerUrl.searchParams.set("maptype", "hybrid");
-        providerUrl.searchParams.set("format", "jpg-baseline");
-        providerUrl.searchParams.set("language", "en");
-        providerUrl.searchParams.set("region", "US");
-        providerUrl.searchParams.set("key", config.mapsKey);
+        const center = `${rounded(latitude, 5)},${rounded(longitude, 5)}`;
+        const cacheKey = `${center}|${zoom}|${logicalSize}`;
+        const cached = await mapCache.getOrLoad(
+          cacheKey,
+          (map) => Math.min(config.mapCacheSeconds, map.maxAgeSeconds),
+          async () => {
+            const providerUrl = new URL(STATIC_MAP_API);
+            providerUrl.searchParams.set("center", center);
+            providerUrl.searchParams.set("zoom", String(zoom));
+            providerUrl.searchParams.set("size", `${logicalSize}x${logicalSize}`);
+            providerUrl.searchParams.set("scale", "2");
+            providerUrl.searchParams.set("maptype", "hybrid");
+            providerUrl.searchParams.set("format", "jpg-baseline");
+            providerUrl.searchParams.set("language", "en");
+            providerUrl.searchParams.set("region", "US");
+            providerUrl.searchParams.set("key", config.mapsKey);
 
-        const upstream = await fetchImpl(providerUrl, {
-          headers: { "User-Agent": USER_AGENT },
-          signal: requestSignal(config.timeoutMs),
-        });
-        const contentType = upstream.headers.get("content-type") || "";
-        if (!upstream.ok || !contentType.startsWith("image/")) {
-          writeProviderError(response, "Satellite map", upstream.status);
-          return;
-        }
-        const image = await readResponseBytes(upstream, MAX_MAP_BYTES);
+            const upstream = await fetchImpl(providerUrl, {
+              headers: { "User-Agent": USER_AGENT },
+              signal: requestSignal(config.timeoutMs),
+            });
+            const contentType = upstream.headers.get("content-type") || "";
+            if (!upstream.ok || !contentType.startsWith("image/")) {
+              const error = new Error("Satellite map request failed.");
+              error.providerStatus = upstream.status;
+              error.feature = "Satellite map";
+              throw error;
+            }
+            return {
+              contentType,
+              image: await readResponseBytes(upstream, MAX_MAP_BYTES),
+              maxAgeSeconds: providerMaxAgeSeconds(upstream.headers.get("cache-control")),
+            };
+          },
+        );
         response.writeHead(
           200,
           secureHeaders({
-            "Content-Type": contentType,
-            "Content-Length": String(image.length),
+            "Content-Type": cached.value.contentType,
+            "Content-Length": String(cached.value.image.length),
+            "X-FlightLane-Cache": cached.cacheStatus,
           }),
         );
-        response.end(image);
+        response.end(cached.value.image);
         return;
       }
 
@@ -751,7 +841,7 @@ export function createFlightLaneServer({
       writeJson(response, 404, { ok: false, error: "Not found." });
     } catch (error) {
       if (error && Number.isInteger(error.providerStatus)) {
-        writeProviderError(response, "Provider data", error.providerStatus);
+        writeProviderError(response, error.feature || "Provider data", error.providerStatus);
         return;
       }
       const isInputError =
@@ -785,9 +875,9 @@ export async function startServer({
   });
   console.log(`Flight Lane local service is listening on http://${config.host}:${config.port}`);
   console.log(
-    `Features: maps=${Boolean(config.mapsKey)} geocoding=${Boolean(
-      config.geocodingKey,
-    )} flightDetails=${Boolean(config.flightAwareKey)} photos=${
+    `Features: maps=${Boolean(config.mapsKey)} geocoding=${
+      geocodingAvailable(config) ? config.geocodingProvider : false
+    } flightDetails=${Boolean(config.flightAwareKey)} photos=${
       config.aircraftPhotosEnabled
     }`,
   );

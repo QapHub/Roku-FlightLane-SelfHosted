@@ -820,6 +820,7 @@ sub UpdateCloseupPip(aircraft as object)
     leadSeconds = m.config.refreshSeconds / 2
     mapCenterPosition = ProjectPosition(currentPosition, aircraft.heading, aircraft.speedKnots, leadSeconds)
     mapSettings = CloseupMapSettings(aircraft, mapCenterPosition)
+    mapCenterPosition = SnapMapCenter(mapCenterPosition, mapSettings.snapMiles)
     m.closeupPip.visible = true
     m.closeupPipTitle.text = aircraft.callsign + "  •  1,000 FT  •  Z" + mapSettings.zoom.ToStr()
 
@@ -872,19 +873,37 @@ function CloseupMapSettings(aircraft as object, mapCenterPosition as object) as 
     latitudeRadians = centerCoordinates.latitude * 3.14159265358979 / 180
     selectedZoom = 0
     metersPerLogicalPixel = 156543.03392 * Cos(latitudeRadians)
+    ' The map center snaps to a grid of 1/4 the half-span, so reserve that much slack.
+    ' Repeated refreshes then reuse one map URL instead of requesting a new provider image.
+    snapFraction = 0.25
     for candidateZoom = m.config.closeupMaxZoom to 0 step -1
         candidateMetersPerLogicalPixel = 156543.03392 * Cos(latitudeRadians) / (2 ^ candidateZoom)
         availableHalfSpanFeet = candidateMetersPerLogicalPixel * 320 / 0.3048
-        if availableHalfSpanFeet >= requiredHalfSpanFeet
+        if availableHalfSpanFeet * (1 - (snapFraction / 2) - 0.02) >= requiredHalfSpanFeet
             selectedZoom = candidateZoom
             metersPerLogicalPixel = candidateMetersPerLogicalPixel
             exit for
         end if
     end for
 
+    ' Size the grid from the home latitude so it stays fixed while the aircraft moves.
+    homeLatitudeRadians = m.config.homeLatitude * 3.14159265358979 / 180
+    homeHalfSpanFeet = 156543.03392 * Cos(homeLatitudeRadians) / (2 ^ selectedZoom) * 320 / 0.3048
+    snapMiles = homeHalfSpanFeet * snapFraction / 5280
+
     nativePixelsPerFoot = (0.3048 / metersPerLogicalPixel) * (m.config.closeupViewportSize / 640)
     displaySize = m.config.closeupViewportSize * (m.config.closeupRadarPixelsPerFoot / nativePixelsPerFoot)
-    return { zoom: selectedZoom, displaySize: displaySize }
+    return { zoom: selectedZoom, displaySize: displaySize, snapMiles: snapMiles }
+end function
+
+function SnapMapCenter(position as object, snapMiles as float) as object
+    if snapMiles <= 0
+        return position
+    end if
+    return {
+        eastMiles: Int((position.eastMiles / snapMiles) + 0.5) * snapMiles
+        northMiles: Int((position.northMiles / snapMiles) + 0.5) * snapMiles
+    }
 end function
 
 function ProjectPosition(position as object, heading as float, speedKnots as float, secondsAhead as float) as object

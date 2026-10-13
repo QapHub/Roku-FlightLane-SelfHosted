@@ -42,30 +42,42 @@ The interface animates projected motion between responses, but a longer cache me
 
 FlightAware is not used for live position fallback by default because its position-search endpoints may be billed. The FlightAware key below is used only for optional route enrichment.
 
-## Satellite maps and address lookup
+## Address lookup
 
-Create a Google Maps Platform project and enable billing. Enable:
+By default, address lookup uses the free [US Census Bureau geocoder](https://geocoding.geo.census.gov/geocoder/). It needs no account or key but matches US street addresses only, so include the street, city, state, and ZIP code.
 
-- [Maps Static API](https://developers.google.com/maps/documentation/maps-static/get-api-key)
-- [Geocoding API](https://developers.google.com/maps/documentation/geocoding/get-api-key)
-
-Create an API key and add:
+To use Google instead (for example, for addresses the Census geocoder cannot match), enable the [Geocoding API](https://developers.google.com/maps/documentation/geocoding/get-api-key) and set either:
 
 ```dotenv
-GOOGLE_MAPS_API_KEY=your_maps_key
 GOOGLE_GEOCODING_API_KEY=your_geocoding_key
 ```
 
-You may use one key for both entries. If `GOOGLE_GEOCODING_API_KEY` is blank, the service falls back to `GOOGLE_MAPS_API_KEY`.
+or `GEOCODING_PROVIDER=google` to reuse `GOOGLE_MAPS_API_KEY`. Address lookup runs only when you enter an address, and results are cached in memory for 24 hours.
+
+## Satellite maps
+
+Create a Google Maps Platform project and enable billing. Enable the [Maps Static API](https://developers.google.com/maps/documentation/maps-static/get-api-key), create an API key, and add:
+
+```dotenv
+GOOGLE_MAPS_API_KEY=your_maps_key
+```
+
+To keep usage low, the local service:
+
+- keeps each map image in memory for up to `MAP_CACHE_SECONDS` (default 24 hours, never longer than Google's own `Cache-Control` allows) and shares one provider call among simultaneous requests for the same image;
+- serves the home overview map from that cache after the first request;
+- receives close-up maps whose centers the Roku snaps to a fixed grid, so a slow or parked aircraft reuses one image instead of requesting a new one every refresh.
+
+A fast-moving selected aircraft can still need a new close-up image on most refreshes. Set budget alerts before leaving the app running continuously with an aircraft selected.
 
 Recommended controls in Google Maps Platform:
 
-- apply API restrictions so the key can call only Maps Static API and Geocoding API;
+- apply API restrictions so the key can call only Maps Static API (and Geocoding API if you use it);
 - set quota alerts and budgets;
 - if your home has a stable public IP, consider an IP application restriction;
 - never put the key directly in BrightScript or commit `.env.local`.
 
-Maps and first-launch address entry will not work without these APIs. Live aircraft data can still work after a location is already saved.
+Satellite maps will not work without the Maps Static API. Live aircraft data can still work after a location is already saved.
 
 ## Flight route details
 

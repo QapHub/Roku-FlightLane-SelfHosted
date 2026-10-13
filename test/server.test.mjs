@@ -190,3 +190,87 @@ test("aircraft provider fallback supports ADSB.fi named path style", async () =>
     "https://opendata.adsb.fi/api/v3/lat/28.5/lon/-81.6/dist/3.476",
   );
 });
+
+test("geocoding uses Census unless a dedicated Google key is configured", () => {
+  assert.equal(testConfig().geocodingProvider, "census");
+  assert.equal(testConfig({ GOOGLE_MAPS_API_KEY: "maps" }).geocodingProvider, "census");
+  assert.equal(testConfig({ GOOGLE_GEOCODING_API_KEY: "geo" }).geocodingProvider, "google");
+  const forcedGoogle = testConfig({ GEOCODING_PROVIDER: "google", GOOGLE_MAPS_API_KEY: "maps" });
+  assert.equal(forcedGoogle.geocodingProvider, "google");
+  assert.equal(forcedGoogle.geocodingKey, "maps");
+  assert.throws(() => testConfig({ GEOCODING_PROVIDER: "other" }), /GEOCODING_PROVIDER/);
+});
+
+test("Census geocoding returns the Google response shape the Roku parses", async (context) => {
+  const requestedUrls = [];
+  const fetchImpl = async (url) => {
+    requestedUrls.push(String(url));
+    if (requestedUrls.length === 1) {
+      return Response.json({
+        result: {
+          addressMatches: [
+            {
+              matchedAddress: "1 MAIN ST, ORLANDO, FL, 32801",
+              coordinates: { x: -81.38, y: 28.54 },
+            },
+          ],
+        },
+      });
+    }
+    return Response.json({ result: { addressMatches: [] } });
+  };
+  const server = createFlightLaneServer({ config: testConfig(), fetchImpl });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  const geocode = (address) =>
+    fetch(`${baseUrl}/v1/geocode`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ address }),
+    }).then((response) => response.json());
+
+  assert.deepEqual(await geocode("1 Main St, Orlando, FL 32801"), {
+    status: "OK",
+    results: [
+      {
+        formatted_address: "1 MAIN ST, ORLANDO, FL, 32801",
+        geometry: { location: { lat: 28.54, lng: -81.38 } },
+      },
+    ],
+  });
+  assert.match(requestedUrls[0], /^https:\/\/geocoding\.geo\.census\.gov\//);
+  assert.doesNotMatch(requestedUrls[0], /key=/);
+  assert.deepEqual(await geocode("99 Nowhere Rd, Nowhere"), { status: "ZERO_RESULTS", results: [] });
+});
+
+test("satellite maps are cached and honor provider cache limits", async (context) => {
+  let cacheControl = "public, max-age=86400";
+  const requestedUrls = [];
+  const fetchImpl = async (url) => {
+    requestedUrls.push(String(url));
+    return new Response(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), {
+      headers: { "Content-Type": "image/jpeg", "Cache-Control": cacheControl },
+    });
+  };
+  const server = createFlightLaneServer({
+    config: testConfig({ GOOGLE_MAPS_API_KEY: "maps-test-secret" }),
+    fetchImpl,
+  });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+
+  const cached = "/v1/map?latitude=28.5&longitude=-81.6&zoom=15";
+  const [first, second] = await Promise.all([fetch(baseUrl + cached), fetch(baseUrl + cached)]);
+  const third = await fetch(baseUrl + cached);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(third.headers.get("x-flightlane-cache"), "hit");
+  assert.deepEqual([...new Uint8Array(await third.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
+  assert.equal(requestedUrls.length, 1);
+
+  cacheControl = "no-store";
+  const uncached = "/v1/map?latitude=28.6&longitude=-81.6&zoom=15";
+  await (await fetch(baseUrl + uncached)).arrayBuffer();
+  await (await fetch(baseUrl + uncached)).arrayBuffer();
+  assert.equal(requestedUrls.length, 3);
+});
