@@ -8,6 +8,7 @@ import {
   isPrivateNetworkAddress,
   normalizeProviderPayload,
   parseEnv,
+  selectCurrentFlight,
 } from "../server/server.mjs";
 
 function testConfig(overrides = {}) {
@@ -434,4 +435,48 @@ test("FlightAware calls stop at the spend limit or when usage cannot be read", a
     /SPEND_WARNING/,
   );
   assert.equal(testConfig({ FLIGHTAWARE_CACHE_TTL: "60" }).flightAwareCacheSeconds, 3600);
+});
+
+test("selectCurrentFlight picks the flight being flown now from a flight number's history", () => {
+  const now = Date.parse("2026-10-13T14:00:00Z");
+  const flight = (origin, destination, times) => ({
+    origin: { code_iata: origin },
+    destination: { code_iata: destination },
+    ...times,
+  });
+  // SWA2632: tonight's scheduled MCO-BWI is listed first, but MCO-RDU is in the air now.
+  const scheduledTonight = flight("MCO", "BWI", {
+    scheduled_off: "2026-10-14T02:45:00Z",
+    scheduled_on: "2026-10-14T04:50:00Z",
+  });
+  const enRoute = flight("MCO", "RDU", {
+    scheduled_off: "2026-10-13T13:10:00Z",
+    actual_off: "2026-10-13T13:17:37Z",
+    scheduled_on: "2026-10-13T14:26:00Z",
+  });
+  const arrivedLastNight = flight("MCO", "BWI", {
+    actual_off: "2026-10-13T03:52:23Z",
+    actual_on: "2026-10-13T05:34:12Z",
+  });
+  assert.equal(selectCurrentFlight([scheduledTonight, enRoute, arrivedLastNight], now), enRoute);
+
+  // On the ground between legs: the leg that just landed is closer to now than the next one.
+  const justLanded = flight("MCO", "RDU", {
+    actual_off: "2026-10-13T12:40:00Z",
+    actual_on: "2026-10-13T13:50:00Z",
+  });
+  const nextLeg = flight("RDU", "BWI", {
+    scheduled_off: "2026-10-13T15:30:00Z",
+    scheduled_on: "2026-10-13T16:45:00Z",
+  });
+  assert.equal(selectCurrentFlight([nextLeg, justLanded], now), justLanded);
+
+  // A stale cached "en route" record from yesterday is not treated as airborne.
+  const staleEnRoute = flight("MCI", "AUS", {
+    actual_off: "2026-10-12T19:59:00Z",
+    scheduled_on: "2026-10-12T21:07:00Z",
+  });
+  assert.equal(selectCurrentFlight([staleEnRoute, nextLeg], now), nextLeg);
+
+  assert.equal(selectCurrentFlight([{ cancelled: true }], now), undefined);
 });

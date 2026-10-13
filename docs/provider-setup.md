@@ -79,6 +79,8 @@ Before each billed lookup, the service checks, in order:
 3. **Spend known:** if usage cannot be read for 30 minutes (wrong key, outage), billed lookups pause rather than risk unmonitored charges.
 4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 500), as a backstop against bursts between 10-minute usage readings. Every on-screen FlightAware mention shows the share of today's cap used, for example `FlightAware (12%) API: $5.40 of $10` and `En Route · FlightAware (12%)`.
 
+FlightAware returns every recent and scheduled flight for a flight number, often on different routes (Southwest, for example, reuses numbers across routes and lists each leg of a multi-stop flight separately). The service shows the one being flown now: the flight that has departed and not yet landed, or otherwise the one whose departure-to-arrival window is closest to the current time. It chooses at display time, so the choice stays current within the cache window, but the status and times shown are as of the cached lookup.
+
 Whenever FlightAware is skipped, fails, or has no match, the route comes from free adsbdb.com data.
 
 Expect spend to scale with how often the selected aircraft changes. Near a busy airport, automatic tracking can select a new aircraft every minute or two, which is several hundred billed lookups a day; the default $10 limit then stops FlightAware within days, after which routes continue from adsbdb.com until the next month.

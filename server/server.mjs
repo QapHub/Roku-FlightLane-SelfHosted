@@ -567,6 +567,54 @@ function providerDisplayName(provider) {
   return PROVIDER_DISPLAY_NAMES[provider] || cleanText(provider, 60);
 }
 
+const HOUR_MS = 60 * 60 * 1000;
+
+function flightTime(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? time : undefined;
+}
+
+// FlightAware returns every recent and scheduled flight for a flight number, often on
+// different routes (and each leg of a multi-stop flight separately). Pick the one being
+// flown now: airborne (departed, not landed), else the one whose departure-to-arrival
+// window is closest to now.
+export function selectCurrentFlight(flights, now = Date.now()) {
+  const candidates = (Array.isArray(flights) ? flights : []).filter(
+    (flight) => flight && typeof flight === "object" && flight.cancelled !== true,
+  );
+  if (candidates.length === 0) return undefined;
+
+  const departure = (flight) =>
+    flightTime(flight.actual_off) ?? flightTime(flight.estimated_off) ?? flightTime(flight.scheduled_off);
+  const arrival = (flight) =>
+    flightTime(flight.actual_on) ?? flightTime(flight.estimated_on) ?? flightTime(flight.scheduled_on);
+
+  // A cached "en route" record whose arrival passed long ago is stale, not airborne.
+  const airborne = candidates.filter(
+    (flight) =>
+      flightTime(flight.actual_off) !== undefined &&
+      flightTime(flight.actual_on) === undefined &&
+      (arrival(flight) ?? departure(flight)) + 2 * HOUR_MS > now,
+  );
+  if (airborne.length > 0) {
+    return airborne.reduce((latest, flight) =>
+      departure(flight) > departure(latest) ? flight : latest,
+    );
+  }
+
+  const distanceFromNow = (flight) => {
+    const departs = departure(flight);
+    const arrives = arrival(flight);
+    if (departs === undefined && arrives === undefined) return Infinity;
+    if (departs !== undefined && now < departs) return departs - now;
+    if (arrives !== undefined && now > arrives) return now - arrives;
+    return 0;
+  };
+  return candidates.reduce((closest, flight) =>
+    distanceFromNow(flight) < distanceFromNow(closest) ? flight : closest,
+  );
+}
+
 // Returns an adsbdb route in the flight-list shape the Roku app parses.
 function normalizeFlightRoute(callsign, data) {
   const route = data?.response?.flightroute;
@@ -940,8 +988,9 @@ export function createFlightLaneServer({
         }
         if (config.flightAwareKey) {
           const live = await lookupFlightAware(callsign);
-          if (live) {
-            writeJson(response, 200, live.value, {
+          const current = live && selectCurrentFlight(live.value.flights);
+          if (current) {
+            writeJson(response, 200, { ...live.value, flights: [current] }, {
               "X-FlightLane-Cache": live.cacheStatus,
             });
             return;
