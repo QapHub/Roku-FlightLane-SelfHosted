@@ -51,7 +51,7 @@ These are the typical route for a flight number, not live flight status, so depa
 
 ### Optional: live status from FlightAware (billed)
 
-[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) adds live status and takeoff and landing times. **It is not free.** AeroAPI requires a billing account and charges per query; the Personal tier currently includes a small monthly usage credit (larger for ADS-B feeders), and usage beyond it is charged to your card. Check FlightAware's current pricing and terms before adding a key.
+[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) adds live status and takeoff and landing times. Times are shown in the Roku's own time zone (**Settings > System > Time** on the Roku), the same as the clock in the header. **It is not free.** AeroAPI requires a billing account and charges per query; the Personal tier currently includes a small monthly usage credit (larger for ADS-B feeders), and usage beyond it is charged to your card. Check FlightAware's current pricing and terms before adding a key.
 
 ```dotenv
 FLIGHTAWARE_API_KEY=your_aeroapi_key
@@ -77,7 +77,7 @@ Before each billed lookup, the service checks, in order:
 1. **Cache:** each callsign's result is reused for `FLIGHTAWARE_CACHE_TTL` minutes (default 1440, 24 hours), including callsigns FlightAware does not know.
 2. **Monthly spend:** month-to-date spend comes from `total_cost` in the usage response, covering every key on your account, before volume discounts. FlightAware updates it every 10 minutes, so the service adds calls made since the last reading at your account's average cost per result page. The Roku shows the spend above **FLIGHT PHASE**, for example `FlightAware API: $5.40 of $10`. It turns amber at `FLIGHTAWARE_API_SPEND_WARNING` (default $5). At `FLIGHTAWARE_API_SPEND_LIMIT` (default $10) it turns red and reads `· paused`, and billed lookups stop until next month.
 3. **Spend known:** if usage cannot be read for 30 minutes (wrong key, outage), billed lookups pause rather than risk unmonitored charges.
-4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 500), as a backstop against bursts between 10-minute usage readings.
+4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 500), as a backstop against bursts between 10-minute usage readings. Every on-screen FlightAware mention shows the share of today's cap used, for example `FlightAware (12%) API: $5.40 of $10` and `En Route · FlightAware (12%)`.
 
 Whenever FlightAware is skipped, fails, or has no match, the route comes from free adsbdb.com data.
 

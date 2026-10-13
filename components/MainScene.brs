@@ -30,6 +30,7 @@ sub init()
     m.rangeLabel = m.top.FindNode("rangeLabel")
     m.dataSourceLabel = m.top.FindNode("dataSourceLabel")
     m.spendNoticeLabel = m.top.FindNode("spendNoticeLabel")
+    m.flightAwareDailyPercent = invalid
     m.aircraftList = m.top.FindNode("aircraftList")
     m.emptyLabel = m.top.FindNode("emptyLabel")
     m.flyoverCountLabel = m.top.FindNode("flyoverCountLabel")
@@ -1169,31 +1170,52 @@ end sub
 ' Shows this month's FlightAware AeroAPI spend when the local service has a FlightAware key.
 sub ShowFlightAwareSpendNotice(spend as dynamic)
     if Type(spend) <> "roAssociativeArray"
+        m.flightAwareDailyPercent = invalid
         m.spendNoticeLabel.visible = false
         return
     end if
 
+    if IsNumericValue(spend.dailyPercent)
+        m.flightAwareDailyPercent = Int(spend.dailyPercent)
+    end if
     state = StringOr(spend.state, "")
     cost = FormatDollars(spend.monthToDateCost)
     limit = FormatDollars(spend.limit)
+    prefix = FlightAwareLabel() + " API: "
     if state = "limit"
-        m.spendNoticeLabel.text = "FlightAware API: " + cost + " of " + limit + " · paused"
+        m.spendNoticeLabel.text = prefix + cost + " of " + limit + " · paused"
         m.spendNoticeLabel.color = "0xFCA5A5FF"
     else if state = "warning"
-        m.spendNoticeLabel.text = "FlightAware API: " + cost + " of " + limit
+        m.spendNoticeLabel.text = prefix + cost + " of " + limit
         m.spendNoticeLabel.color = "0xFBBF24FF"
     else if state = "unavailable"
-        m.spendNoticeLabel.text = "FlightAware API: usage unknown · paused"
+        m.spendNoticeLabel.text = prefix + "usage unknown · paused"
         m.spendNoticeLabel.color = "0xFBBF24FF"
     else if state = "checking"
-        m.spendNoticeLabel.text = "FlightAware API: checking usage…"
+        m.spendNoticeLabel.text = prefix + "checking usage…"
         m.spendNoticeLabel.color = "0x8DA8C2FF"
     else
-        m.spendNoticeLabel.text = "FlightAware API: " + cost + " of " + limit
+        m.spendNoticeLabel.text = prefix + cost + " of " + limit
         m.spendNoticeLabel.color = "0x8DA8C2FF"
     end if
     m.spendNoticeLabel.visible = true
 end sub
+
+' "FlightAware (12%)": the share of FLIGHTAWARE_DAILY_LIMIT used today, when known.
+function FlightAwareLabel() as string
+    if m.flightAwareDailyPercent = invalid
+        return "FlightAware"
+    end if
+    return "FlightAware (" + m.flightAwareDailyPercent.ToStr() + "%)"
+end function
+
+function SourceLabel(source as dynamic) as string
+    text = StringOr(source, "")
+    if text = "FlightAware"
+        return FlightAwareLabel()
+    end if
+    return text
+end function
 
 sub HandleNearbyResult(result as object)
     if result.ok <> true
@@ -1642,12 +1664,12 @@ sub ShowFlightDetails(details as object)
     if details.status <> ""
         m.flightStatusValue.text = details.status
         if IsNonEmptyString(details.source)
-            m.flightStatusValue.text = m.flightStatusValue.text + " · " + details.source
+            m.flightStatusValue.text = m.flightStatusValue.text + " · " + SourceLabel(details.source)
         end if
     else
         m.flightStatusValue.text = "Typical route"
         if IsNonEmptyString(details.source)
-            m.flightStatusValue.text = m.flightStatusValue.text + " · " + details.source
+            m.flightStatusValue.text = m.flightStatusValue.text + " · " + SourceLabel(details.source)
         end if
     end if
     departureTime = PreferredTime(details.actualOff, details.estimatedOff, details.scheduledOff)
@@ -1669,11 +1691,37 @@ function PreferredTime(actualValue as dynamic, estimatedValue as dynamic, schedu
     return ""
 end function
 
+' Converts an ISO 8601 UTC time to the Roku's local time zone: "2:05 PM", or "Oct 14 2:05 PM"
+' when it falls on a different local day than today.
 function FriendlyTime(value as string) as string
-    if value.Len() >= 16
-        return Mid(value, 6, 5) + " " + Mid(value, 12, 5) + "Z"
+    if value.Len() < 16
+        return value
     end if
-    return value
+    moment = CreateObject("roDateTime")
+    moment.FromISO8601String(value)
+    if moment.AsSeconds() <= 0
+        return value
+    end if
+    moment.ToLocalTime()
+    today = CreateObject("roDateTime")
+    today.Mark()
+    today.ToLocalTime()
+
+    hours = moment.GetHours()
+    suffix = "AM"
+    if hours >= 12
+        suffix = "PM"
+    end if
+    displayHours = hours mod 12
+    if displayHours = 0
+        displayHours = 12
+    end if
+    text = displayHours.ToStr() + ":" + PadTwo(moment.GetMinutes()) + " " + suffix
+    if moment.GetDayOfMonth() <> today.GetDayOfMonth() or moment.GetMonth() <> today.GetMonth()
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        text = months[moment.GetMonth() - 1] + " " + moment.GetDayOfMonth().ToStr() + " " + text
+    end if
+    return text
 end function
 
 function TimeLine(label as string, value as string) as string

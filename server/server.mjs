@@ -69,6 +69,11 @@ class DailyBudget {
     return Math.max(0, this.limit - this.used);
   }
 
+  percentUsed() {
+    this.rollOver();
+    return this.limit > 0 ? Math.min(100, Math.round((this.used / this.limit) * 100)) : 100;
+  }
+
   tryConsume() {
     if (this.remaining() === 0) return false;
     this.used += 1;
@@ -735,6 +740,7 @@ export function createFlightLaneServer({
       monthToDateCost: estimated,
       warning: config.flightAwareSpendWarning,
       limit: config.flightAwareSpendLimit,
+      dailyPercent: flightAwareBudget.percentUsed(),
     };
   }
 

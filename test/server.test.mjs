@@ -366,7 +366,7 @@ test("without a FlightAware key the service never contacts AeroAPI", async (cont
 });
 
 test("FlightAware is preferred when a key is set, cached, and capped per day", async (context) => {
-  const { lookup, requestedUrls, billedCalls } = await flightAwareServer(context, {
+  const { baseUrl, lookup, requestedUrls, billedCalls } = await flightAwareServer(context, {
     FLIGHTAWARE_DAILY_LIMIT: "2",
   });
 
@@ -384,6 +384,9 @@ test("FlightAware is preferred when a key is set, cached, and capped per day", a
 
   await lookup("UAL1");
   assert.equal(billedCalls(), 2);
+
+  const health = await (await fetch(`${baseUrl}/health`)).json();
+  assert.equal(health.flightAwareSpend.dailyPercent, 100);
 
   const overLimit = await lookup("DAL1");
   assert.equal(billedCalls(), 2, "the daily limit blocks further billed calls");
@@ -411,6 +414,7 @@ test("FlightAware usage is read for this month and reported to the Roku", async 
     monthToDateCost: 5.52,
     warning: 5,
     limit: 10,
+    dailyPercent: 0,
   });
 });
 
