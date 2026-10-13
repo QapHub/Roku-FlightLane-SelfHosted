@@ -118,6 +118,7 @@ sub OnSettingsResult(event as object)
             longitude: NumberOr(saved.longitude, 0)
             radiusMiles: ClampSettingsRadius(NumberOr(saved.radiusMiles, 4))
             idleMinutes: 0
+            showFlyoverCount: saved.showFlyoverCount
         }
         BuildContent()
         m.settingsList.SetFocus(true)

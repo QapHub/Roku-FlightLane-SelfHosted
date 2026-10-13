@@ -92,7 +92,8 @@ On first launch, enter the location to monitor. Use the `*` button later to:
 
 - change the address;
 - select a radius from 1 through 10 miles;
-- choose the idle display timeout.
+- choose the idle display timeout;
+- show or hide the 24-hour flyover count in the header. Its default comes from `SHOW_FLYOVER_COUNT` in `.env.local` (on unless set to `false`); a choice made in settings is saved on the Roku and takes precedence.
 
 The live list and map show only aircraft inside the selected radar radius. The PIP follows the selected aircraft; choosing a plane manually keeps that selection until it disappears from the area.
 

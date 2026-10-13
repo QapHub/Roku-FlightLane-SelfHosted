@@ -39,6 +39,7 @@ sub init()
     m.aircraftList = m.top.FindNode("aircraftList")
     m.emptyLabel = m.top.FindNode("emptyLabel")
     m.flyoverCountLabel = m.top.FindNode("flyoverCountLabel")
+    m.flyoverCountCaption = m.top.FindNode("flyoverCountCaption")
     m.selectedTitle = m.top.FindNode("selectedTitle")
     m.selectedMeta = m.top.FindNode("selectedMeta")
     m.airlineBadgeBackground = m.top.FindNode("airlineBadgeBackground")
@@ -524,13 +525,21 @@ sub ApplyRuntimeSettings(settings as object)
     if idleMinutes < 0
         idleMinutes = 0
     end if
+    ' Saved choice wins; otherwise SHOW_FLYOVER_COUNT from the build (default on).
+    showFlyoverCount = m.config.showFlyoverCount <> false
+    if Type(settings.showFlyoverCount) = "roBoolean" or Type(settings.showFlyoverCount) = "Boolean"
+        showFlyoverCount = settings.showFlyoverCount
+    end if
     m.settings = {
         address: StringOr(settings.address, "Saved home location")
         latitude: NumberOr(settings.latitude, 0)
         longitude: NumberOr(settings.longitude, 0)
         radiusMiles: radiusMiles
         idleMinutes: idleMinutes
+        showFlyoverCount: showFlyoverCount
     }
+    m.flyoverCountCaption.visible = showFlyoverCount
+    m.flyoverCountLabel.visible = showFlyoverCount
     m.pendingSettings = invalid
     m.firstLaunchSetup = false
     m.settingsOpen = false
@@ -629,7 +638,15 @@ function CloneSettings(settings as object) as object
         longitude: settings.longitude
         radiusMiles: settings.radiusMiles
         idleMinutes: settings.idleMinutes
+        showFlyoverCount: settings.showFlyoverCount
     }
+end function
+
+function OnOffLabel(value as dynamic) as string
+    if IsTrue(value)
+        return "On"
+    end if
+    return "Off"
 end function
 
 function FormatSettingNumber(value as float) as string
@@ -673,6 +690,7 @@ sub BuildSettingsContent()
         "Change home address"
         "Detection radius: " + FormatSettingNumber(m.pendingSettings.radiusMiles) + " miles"
         "Idle display mode: " + idleLabel
+        "24-hour flyover count: " + OnOffLabel(m.pendingSettings.showFlyoverCount)
         "Save and close"
     ]
     content = CreateObject("roSGNode", "ContentNode")
@@ -698,6 +716,8 @@ sub ActivateSettingsRow(index as integer)
     else if index = 2
         AdjustSettingsValue(1)
     else if index = 3
+        AdjustSettingsValue(1)
+    else if index = 4
         m.statusLabel.text = "SAVING SETTINGS..."
         SaveRuntimeSettings(m.pendingSettings)
     end if
@@ -723,6 +743,8 @@ sub AdjustSettingsValue(direction as integer)
             selectedOption = 0
         end if
         m.pendingSettings.idleMinutes = idleOptions[selectedOption]
+    else if index = 3
+        m.pendingSettings.showFlyoverCount = m.pendingSettings.showFlyoverCount <> true
     else
         return
     end if

@@ -65,6 +65,7 @@ export function buildPackage({ environmentFile = ".env.local", screenSaver = fal
   const flightLaneApiUrl = brightScriptString(String(config.FLIGHTLANE_API_URL ?? "").replace(/\/+$/, ""));
 
   const hasLocation = false;
+  const showFlyoverCount = !/^(0|false|no|off)$/i.test(String(config.SHOW_FLYOVER_COUNT ?? "true").trim());
   if (radiusMiles < 1 || radiusMiles > 10) {
     throw new Error("RADIUS_MILES must be from 1 to 10.");
   }
@@ -129,6 +130,7 @@ function GetAppConfig() as object
         closeupMaxZoom: ${closeupMaxZoom}
         flightLaneApiUrl: "${flightLaneApiUrl}"
         buildId: "${brightScriptString(gitBuildId())}"
+        showFlyoverCount: ${showFlyoverCount}
     }
 end function
 `;
