@@ -68,12 +68,12 @@ sub init()
     m.appTitle.text = m.config.appName
     m.subtitle.text = "LIVE AIRCRAFT WITHIN " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MILES OF HOME"
     if false
-        m.rangeLabel.text = "SATELLITE  •  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI RADIUS"
+        m.rangeLabel.text = "Satellite · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi radius"
         m.satelliteRemoteRequested = true
         mapUrl = SatelliteMapUrl(m.config.homeLatitude, m.config.homeLongitude, m.config.mapZoom)
         m.satelliteMap.uri = mapUrl
     else
-        m.rangeLabel.text = "RANGE  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI"
+        m.rangeLabel.text = "Range · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi"
     end if
     m.aircraft = []
     m.selectedIndex = 0
@@ -801,9 +801,9 @@ sub EnsureOverviewMap()
             m.satelliteRemoteRequested = true
             m.satelliteMap.uri = mapUrl
         end if
-        m.rangeLabel.text = "SATELLITE  •  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI FROM HOME"
+        m.rangeLabel.text = "Satellite · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi from home"
     else
-        m.rangeLabel.text = "RANGE  •  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI FROM HOME"
+        m.rangeLabel.text = "Range · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi from home"
     end if
 end sub
 
@@ -818,7 +818,7 @@ sub UpdateCloseupPip(aircraft as object)
     mapSettings = CloseupMapSettings(aircraft, mapCenterPosition)
     mapCenterPosition = SnapMapCenter(mapCenterPosition, mapSettings.snapMiles)
     m.closeupPip.visible = true
-    m.closeupPipTitle.text = aircraft.callsign + "  •  1,000 FT  •  Z" + mapSettings.zoom.ToStr()
+    m.closeupPipTitle.text = aircraft.callsign + " · 1,000 ft · Z" + mapSettings.zoom.ToStr()
 
     if m.config.satelliteMapEnabled
         centerCoordinates = CoordinatesFromHomeOffset(mapCenterPosition.eastMiles, mapCenterPosition.northMiles)
@@ -920,7 +920,7 @@ sub OnSatelliteLoadStatus(event as object)
     if event.GetData() = "failed" and m.satelliteRemoteRequested
         m.satelliteRemoteRequested = false
         m.satelliteMap.uri = "pkg:/images/map-backdrop.jpg"
-        m.rangeLabel.text = "RADAR  •  SATELLITE MAP UNAVAILABLE"
+        m.rangeLabel.text = "Radar · satellite map unavailable"
     end if
 end sub
 
@@ -1363,7 +1363,7 @@ function CurrentEpochSeconds() as longinteger
 end function
 
 function AircraftListTitle(aircraft as object) as string
-    return aircraft.callsign + "   " + RoundTo(aircraft.distanceMiles, 1).ToStr() + " mi   " + FormatAltitude(aircraft.altitudeFt, aircraft.onGround)
+    return aircraft.callsign + "  " + RoundTo(aircraft.distanceMiles, 1).ToStr() + " mi  " + FormatAltitude(aircraft.altitudeFt, aircraft.onGround)
 end function
 
 sub OnAircraftFocused(event as object)
@@ -1400,7 +1400,7 @@ sub UpdateSelection()
     if aircraft.registration = "" and aircraft.aircraftType = ""
         metaParts.Push("ICAO " + UCase(aircraft.id))
     end if
-    m.selectedMeta.text = JoinText(metaParts, "  •  ")
+    m.selectedMeta.text = JoinText(metaParts, " · ")
     m.speedValue.text = FormatSpeed(aircraft.speedKnots)
     m.headingValue.text = CompassDirection(aircraft.heading) + "  " + FormatWhole(aircraft.heading) + "°"
     m.phaseValue.text = aircraft.phase + VerticalRateLabel(aircraft.verticalRateFpm)
