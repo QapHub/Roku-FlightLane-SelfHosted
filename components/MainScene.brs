@@ -55,6 +55,7 @@ sub init()
     m.footerControls = m.top.FindNode("footerControls")
     m.footerSettingsControls = m.top.FindNode("footerSettingsControls")
     m.footerLabel = m.top.FindNode("footerLabel")
+    ApplyCompactFonts()
     m.refreshTimer = m.top.FindNode("refreshTimer")
     m.motionTimer = m.top.FindNode("motionTimer")
     m.clockTimer = m.top.FindNode("clockTimer")
@@ -1221,6 +1222,45 @@ function SourceLabel(source as dynamic) as string
     end if
     return text
 end function
+
+' Built-in Roku fonts bottom out around 27px at 1080p, which truncates longer lines.
+' Shrink the system font on labels that carry variable-length text.
+sub ApplyCompactFonts()
+    sizes = {
+        statusLabel: 26
+        aircraftList: 26
+        closeupPipTitle: 24
+        airlineNameValue: 26
+        selectedMeta: 22
+        phaseValue: 30
+        projectionValue: 28
+        routeValue: 28
+        flightStatusValue: 22
+        departureValue: 22
+        arrivalValue: 22
+        spendNoticeLabel: 22
+        rangeLabel: 22
+        dataSourceLabel: 22
+        closeupImageryCredit: 20
+        aircraftPhotoAttribution: 20
+    }
+    for each id in sizes
+        node = m.top.FindNode(id)
+        if node <> invalid
+            SetFontSize(node, "font", sizes[id])
+            if node.HasField("focusedFont")
+                SetFontSize(node, "focusedFont", sizes[id])
+            end if
+        end if
+    end for
+end sub
+
+sub SetFontSize(node as object, field as string, size as integer)
+    font = node.GetField(field)
+    if Type(font) = "roSGNode"
+        font.size = size
+    end if
+end sub
 
 sub HandleNearbyResult(result as object)
     if result.ok <> true
