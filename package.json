@@ -10,6 +10,7 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "api": "node server/server.mjs",
+    "serve": "node scripts/supervise.mjs",
     "build": "node scripts/build.mjs",
     "build:screensaver": "node scripts/build.mjs --screensaver",
     "deploy": "node scripts/deploy.mjs",
