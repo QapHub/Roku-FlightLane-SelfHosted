@@ -28,6 +28,10 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
 const FLIGHT_ROUTE_API = "https://api.adsbdb.com/v0/callsign";
 // Optional, billed per query. Used only for manually selected aircraft and capped per day.
 const FLIGHTAWARE_FLIGHTS_API = "https://aeroapi.flightaware.com/aeroapi/flights";
+// Free to call. FlightAware refreshes account usage data every 10 minutes.
+const FLIGHTAWARE_USAGE_API = "https://aeroapi.flightaware.com/aeroapi/account/usage";
+const FLIGHTAWARE_USAGE_REFRESH_MS = 10 * 60 * 1000;
+const FLIGHTAWARE_USAGE_STALE_MS = 30 * 60 * 1000;
 const GEOCODING_API = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
 // Public-domain USDA/USGS orthoimagery from The National Map (United States coverage).
 const IMAGERY_EXPORT_API =
@@ -169,6 +173,16 @@ function booleanSetting(environment, name, fallback) {
 }
 
 export function createConfig(environment) {
+  const config = buildConfig(environment);
+  if (config.flightAwareSpendWarning > config.flightAwareSpendLimit) {
+    throw new Error(
+      "FLIGHTAWARE_API_SPEND_WARNING must not be greater than FLIGHTAWARE_API_SPEND_LIMIT.",
+    );
+  }
+  return config;
+}
+
+function buildConfig(environment) {
   const aircraftBaseUrl = String(
     environment.AIRCRAFT_API_BASE_URL || DEFAULT_AIRCRAFT_API,
   ).replace(/\/+$/, "");
@@ -194,14 +208,17 @@ export function createConfig(environment) {
     mapCacheSeconds: numberSetting(environment, "MAP_CACHE_SECONDS", 86400, 0, 604800),
     flightRoutesEnabled: booleanSetting(environment, "ENABLE_FLIGHT_ROUTES", true),
     flightAwareKey: String(environment.FLIGHTAWARE_API_KEY || "").trim(),
-    flightAwareCacheSeconds: numberSetting(
-      environment,
-      "FLIGHTAWARE_CACHE_SECONDS",
-      86400,
-      900,
-      604800,
-    ),
+    flightAwareCacheSeconds:
+      numberSetting(environment, "FLIGHTAWARE_CACHE_TTL", 1440, 15, 10080) * 60,
     flightAwareDailyLimit: numberSetting(environment, "FLIGHTAWARE_DAILY_LIMIT", 25, 0, 1000),
+    flightAwareSpendWarning: numberSetting(
+      environment,
+      "FLIGHTAWARE_API_SPEND_WARNING",
+      5,
+      0,
+      100000,
+    ),
+    flightAwareSpendLimit: numberSetting(environment, "FLIGHTAWARE_API_SPEND_LIMIT", 10, 0, 100000),
     flightDetailsCacheSeconds: numberSetting(
       environment,
       "FLIGHT_DETAILS_CACHE_SECONDS",
@@ -587,6 +604,117 @@ export function createFlightLaneServer({
   const mapCache = new TtlCache({ maxEntries: MAP_CACHE_MAX_ENTRIES });
   const flightAwareCache = new TtlCache();
   const flightAwareBudget = new DailyBudget(config.flightAwareDailyLimit);
+  const flightAwareSpend = {
+    cost: undefined,
+    costPerPage: 0,
+    callsSinceCheck: 0,
+    month: "",
+    checkedAt: 0,
+    refreshing: undefined,
+    loggedState: "",
+  };
+
+  function currentUtcMonth() {
+    return new Date().toISOString().slice(0, 7);
+  }
+
+  // Reads this month's account-wide AeroAPI spend. Failures keep the previous reading,
+  // which goes stale after FLIGHTAWARE_USAGE_STALE_MS and then pauses billed calls.
+  function refreshFlightAwareSpend() {
+    if (flightAwareSpend.refreshing) return flightAwareSpend.refreshing;
+    flightAwareSpend.refreshing = (async () => {
+      const month = currentUtcMonth();
+      const providerUrl = new URL(FLIGHTAWARE_USAGE_API);
+      providerUrl.searchParams.set("start", `${month}-01`);
+      providerUrl.searchParams.set("all_keys", "true");
+      try {
+        const upstream = await fetchJson(fetchImpl, providerUrl, {
+          headers: providerHeaders({ "x-apikey": config.flightAwareKey }),
+          signal: requestSignal(config.timeoutMs),
+        });
+        const cost = Number(upstream.data?.total_cost);
+        if (!upstream.ok || !Number.isFinite(cost)) {
+          const error = new Error("FlightAware usage request failed.");
+          error.providerStatus = upstream.status;
+          throw error;
+        }
+        const pages = Number(upstream.data?.total_pages);
+        flightAwareSpend.cost = cost;
+        flightAwareSpend.costPerPage = pages > 0 ? cost / pages : 0;
+        flightAwareSpend.callsSinceCheck = 0;
+        flightAwareSpend.month = month;
+        flightAwareSpend.checkedAt = Date.now();
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "provider_error",
+            feature: "FlightAware usage",
+            providerStatus: Number.isInteger(error?.providerStatus) ? error.providerStatus : 0,
+          }),
+        );
+      } finally {
+        flightAwareSpend.refreshing = undefined;
+      }
+      flightAwareSpendStatus();
+    })();
+    return flightAwareSpend.refreshing;
+  }
+
+  function refreshFlightAwareSpendIfDue() {
+    if (
+      config.flightAwareKey &&
+      Date.now() - flightAwareSpend.checkedAt >= FLIGHTAWARE_USAGE_REFRESH_MS
+    ) {
+      refreshFlightAwareSpend();
+    }
+  }
+
+  // Usage data lags up to 10 minutes, so calls made since the last reading are added at the
+  // account's average cost per result page.
+  function flightAwareSpendStatus() {
+    const fresh =
+      flightAwareSpend.cost !== undefined &&
+      flightAwareSpend.month === currentUtcMonth() &&
+      Date.now() - flightAwareSpend.checkedAt < FLIGHTAWARE_USAGE_STALE_MS;
+    const estimated = fresh
+      ? rounded(
+          flightAwareSpend.cost + flightAwareSpend.callsSinceCheck * flightAwareSpend.costPerPage,
+          2,
+        )
+      : undefined;
+    let state = "ok";
+    if (!fresh) {
+      state =
+        flightAwareSpend.checkedAt === 0 && flightAwareSpend.refreshing ? "checking" : "unavailable";
+    } else if (estimated >= config.flightAwareSpendLimit) {
+      state = "limit";
+    } else if (estimated >= config.flightAwareSpendWarning) {
+      state = "warning";
+    }
+    if (state !== flightAwareSpend.loggedState && state !== "checking") {
+      flightAwareSpend.loggedState = state;
+      console.error(
+        JSON.stringify({
+          event: "flightaware_spend",
+          state,
+          monthToDateCost: estimated,
+          warning: config.flightAwareSpendWarning,
+          limit: config.flightAwareSpendLimit,
+        }),
+      );
+    }
+    return {
+      state,
+      monthToDateCost: estimated,
+      warning: config.flightAwareSpendWarning,
+      limit: config.flightAwareSpendLimit,
+    };
+  }
+
+  function flightAwareCallsAllowed() {
+    const { state } = flightAwareSpendStatus();
+    return (state === "ok" || state === "warning") && flightAwareBudget.remaining() > 0;
+  }
 
   // Returns FlightAware live status for a callsign, or undefined to fall back to free routes.
   async function lookupFlightAware(callsign) {
@@ -595,6 +723,15 @@ export function createFlightLaneServer({
         callsign,
         config.flightAwareCacheSeconds,
         async () => {
+          if (Date.now() - flightAwareSpend.checkedAt >= FLIGHTAWARE_USAGE_REFRESH_MS) {
+            await refreshFlightAwareSpend();
+          }
+          const spend = flightAwareSpendStatus();
+          if (spend.state !== "ok" && spend.state !== "warning") {
+            const error = new Error("FlightAware spending is paused.");
+            error.budgetExhausted = true;
+            throw error;
+          }
           if (!flightAwareBudget.tryConsume()) {
             if (!flightAwareBudget.exhaustedLogged) {
               flightAwareBudget.exhaustedLogged = true;
@@ -609,6 +746,7 @@ export function createFlightLaneServer({
             error.budgetExhausted = true;
             throw error;
           }
+          flightAwareSpend.callsSinceCheck += 1;
           const upstream = await fetchJson(
             fetchImpl,
             `${FLIGHTAWARE_FLIGHTS_API}/${encodeURIComponent(callsign)}?max_pages=1`,
@@ -673,6 +811,7 @@ export function createFlightLaneServer({
             liveFlightStatus: config.flightRoutesEnabled && Boolean(config.flightAwareKey),
             aircraftPhotos: config.aircraftPhotosEnabled,
           },
+          flightAwareSpend: config.flightAwareKey ? flightAwareSpendStatus() : undefined,
         });
         return;
       }
@@ -745,9 +884,11 @@ export function createFlightLaneServer({
             return { payload: result.payload, provider: result.provider };
           },
         );
+        refreshFlightAwareSpendIfDue();
         const payload = {
           ...cached.value.payload,
           flightLaneSource: providerDisplayName(cached.value.provider),
+          flightAware: config.flightAwareKey ? flightAwareSpendStatus() : undefined,
         };
         writeJson(response, 200, payload, {
           "X-FlightLane-Cache": cached.cacheStatus,
@@ -796,8 +937,8 @@ export function createFlightLaneServer({
             return normalizeFlightRoute(callsign, upstream.data);
           },
         );
-        const liveStatusAvailable =
-          Boolean(config.flightAwareKey) && flightAwareBudget.remaining() > 0;
+        refreshFlightAwareSpendIfDue();
+        const liveStatusAvailable = Boolean(config.flightAwareKey) && flightAwareCallsAllowed();
         writeJson(response, 200, { ...cached.value, liveStatusAvailable }, {
           "X-FlightLane-Cache": cached.cacheStatus,
         });
@@ -975,7 +1116,9 @@ export async function startServer({
   console.log(`Flight Lane local service is listening on http://${config.host}:${config.port}`);
   console.log(
     `Features: maps=usgs geocoding=census flightRoutes=${config.flightRoutesEnabled} flightAware=${
-      config.flightAwareKey ? `manual-only, ${config.flightAwareDailyLimit}/day` : "off"
+      config.flightAwareKey
+        ? `manual-only, ${config.flightAwareDailyLimit}/day, warn $${config.flightAwareSpendWarning}, limit $${config.flightAwareSpendLimit}`
+        : "off"
     } photos=${
       config.aircraftPhotosEnabled
     }`,

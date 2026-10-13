@@ -81,6 +81,11 @@ function UrlEncode(value as dynamic) as string
     return transfer.Escape(value.ToStr())
 end function
 
+function FormatDollars(value as dynamic) as string
+    cents = Int((NumberOr(value, 0) * 100) + 0.5)
+    return "$" + Int(cents / 100).ToStr() + "." + PadTwo(cents mod 100)
+end function
+
 function PadTwo(value as integer) as string
     if value < 10
         return "0" + value.ToStr()

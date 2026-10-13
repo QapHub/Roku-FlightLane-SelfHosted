@@ -85,6 +85,7 @@
             <Label translation="[1610,493]" width="220" height="30" text="HEADING" color="0x7896B0FF" />
             <Label id="headingValue" translation="[1610,529]" width="220" height="44" text="—" color="0xFFFFFFFF" />
 
+            <Label id="spendNoticeLabel" translation="[1320,590]" width="530" height="32" color="0x8DA8C2FF" vertAlign="center" font="font:SmallestSystemFont" visible="false" />
             <Label translation="[1320,625]" width="250" height="32" text="FLIGHT PHASE" color="0x7896B0FF" />
             <Label id="phaseValue" translation="[1320,660]" width="520" height="42" text="—" color="0xFBBF24FF" />
             <Label id="projectionValue" translation="[1320,710]" width="520" height="70" wrap="true" numLines="2" text="—" color="0x7DD3FCFF" />

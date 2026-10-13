@@ -55,18 +55,31 @@ These are the typical route for a flight number, not live flight status, so depa
 
 ```dotenv
 FLIGHTAWARE_API_KEY=your_aeroapi_key
-FLIGHTAWARE_CACHE_SECONDS=86400
+FLIGHTAWARE_CACHE_TTL=1440
 FLIGHTAWARE_DAILY_LIMIT=25
+FLIGHTAWARE_API_SPEND_WARNING=5
+FLIGHTAWARE_API_SPEND_LIMIT=10
 ```
 
-To keep charges predictable, the local service:
+**Without a key, nothing is sent to FlightAware.** The service makes no AeroAPI requests of any kind, including usage checks, and the Roku shows no FlightAware notice.
 
-- calls FlightAware only when you select an aircraft yourself; the automatically tracked closest aircraft always uses free adsbdb.com data;
-- asks once per aircraft, requests a single result page (`max_pages=1`), and caches each callsign for `FLIGHTAWARE_CACHE_SECONDS` (default 24 hours), including callsigns FlightAware does not know;
-- stops calling FlightAware after `FLIGHTAWARE_DAILY_LIMIT` calls per UTC day (default 25) and falls back to adsbdb.com, logging `flightaware_daily_limit_reached` once;
-- falls back to adsbdb.com whenever FlightAware fails or has no match.
+With a key, the local service makes two kinds of AeroAPI request:
 
-The daily count is kept in memory, so restarting the service resets it. The worst case is about `FLIGHTAWARE_DAILY_LIMIT × 31` billed calls per month, plus any made before restarts; size the limit so that fits within your credit, and set any usage alerts AeroAPI offers. A long cache can show an earlier flight's times if the same flight number flies again within the cache window.
+| Request | Billed | When |
+| --- | --- | --- |
+| `GET /account/usage?start=<first of this month>&all_keys=true` | No (FlightAware documents it as free) | At most every 10 minutes while the app is refreshing, and before a billed lookup if the last reading is 10 minutes old |
+| `GET /flights/<callsign>?max_pages=1` | Yes | Only when you select an aircraft yourself and every check below passes |
+
+Before each billed lookup, the service checks, in order:
+
+1. **Cache:** each callsign's result is reused for `FLIGHTAWARE_CACHE_TTL` minutes (default 1440, 24 hours), including callsigns FlightAware does not know.
+2. **Monthly spend:** month-to-date spend comes from `total_cost` in the usage response, covering every key on your account, before volume discounts. FlightAware updates it every 10 minutes, so the service adds calls made since the last reading at your account's average cost per result page. At `FLIGHTAWARE_API_SPEND_WARNING` (default $5) the Roku shows an amber warning; at `FLIGHTAWARE_API_SPEND_LIMIT` (default $10) billed lookups stop until next month and the Roku shows a red notice.
+3. **Spend known:** if usage cannot be read for 30 minutes (wrong key, outage), billed lookups pause rather than risk unmonitored charges.
+4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 25), as a backstop between usage readings.
+
+Whenever FlightAware is skipped, fails, or has no match, the route comes from free adsbdb.com data. The automatically tracked closest aircraft always uses adsbdb.com.
+
+The spend limit is a safeguard, not a guarantee: FlightAware's figure can lag, and calls in flight when the limit is crossed still complete. Set it below what you are willing to pay, and set any usage alerts AeroAPI offers. The daily count is kept in memory, so restarting the service resets it. A long cache can show an earlier flight's times if the same flight number flies again within the cache window.
 
 Treat the key like a password: it stays in `.env.local` on your computer, is never compiled into the Roku app, and should be rotated in the AeroAPI portal if it is ever disclosed.
 

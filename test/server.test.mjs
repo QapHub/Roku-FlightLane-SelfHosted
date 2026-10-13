@@ -299,32 +299,73 @@ test("flight routes come from adsbdb and unknown callsigns return no flights", a
   assert.deepEqual((await unknown.json()).flights, []);
 });
 
-test("FlightAware is used only for manual selections, cached, and capped per day", async (context) => {
+function flightAwareFetch({ totalCost = 1.25, usageStatus = 200 } = {}) {
   const requestedUrls = [];
   const fetchImpl = async (url, options = {}) => {
-    requestedUrls.push(String(url));
-    if (String(url).startsWith("https://aeroapi.flightaware.com/")) {
+    const text = String(url);
+    requestedUrls.push(text);
+    if (text.startsWith("https://aeroapi.flightaware.com/aeroapi/account/usage")) {
+      assert.equal(options.headers["x-apikey"], "fa-test-secret");
+      if (usageStatus !== 200) return Response.json({ title: "error" }, { status: usageStatus });
+      return Response.json({ total_cost: totalCost, total_pages: 250 });
+    }
+    if (text.startsWith("https://aeroapi.flightaware.com/")) {
       assert.equal(options.headers["x-apikey"], "fa-test-secret");
       return Response.json({
         flights: [{ ident: "AAL100", status: "En Route / On Time", origin: { code_iata: "JFK" } }],
       });
     }
+    if (text.includes("/point/")) return Response.json({ ac: [], now: 1234567890000 });
     return Response.json({ response: "unknown callsign" }, { status: 404 });
   };
+  const billedCalls = () =>
+    requestedUrls.filter((url) => url.startsWith("https://aeroapi.flightaware.com/aeroapi/flights/"))
+      .length;
+  return { fetchImpl, requestedUrls, billedCalls };
+}
+
+async function flightAwareServer(context, overrides, fetchOptions) {
+  const fake = flightAwareFetch(fetchOptions);
   const server = createFlightLaneServer({
-    config: testConfig({ FLIGHTAWARE_API_KEY: "fa-test-secret", FLIGHTAWARE_DAILY_LIMIT: "2" }),
-    fetchImpl,
+    config: testConfig({ FLIGHTAWARE_API_KEY: "fa-test-secret", ...overrides }),
+    fetchImpl: fake.fetchImpl,
   });
   context.after(() => server.close());
   const baseUrl = await listen(server);
   const lookup = async (callsign, manual) =>
     (await fetch(`${baseUrl}/v1/flights/${callsign}${manual ? "?manual=1" : ""}`)).json();
-  const flightAwareCalls = () =>
-    requestedUrls.filter((url) => url.startsWith("https://aeroapi.flightaware.com/")).length;
+  return { ...fake, baseUrl, lookup };
+}
+
+test("without a FlightAware key the service never contacts AeroAPI", async (context) => {
+  const fake = flightAwareFetch();
+  const server = createFlightLaneServer({ config: testConfig(), fetchImpl: fake.fetchImpl });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+
+  const route = await (await fetch(`${baseUrl}/v1/flights/AAL100?manual=1`)).json();
+  const nearby = await (
+    await fetch(`${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=4`)
+  ).json();
+  const health = await (await fetch(`${baseUrl}/health`)).json();
+
+  assert.equal(route.liveStatusAvailable, false);
+  assert.equal(nearby.flightAware, undefined);
+  assert.equal(health.flightAwareSpend, undefined);
+  assert.equal(fake.requestedUrls.some((url) => url.includes("flightaware")), false);
+});
+
+test("FlightAware is used only for manual selections, cached, and capped per day", async (context) => {
+  const { lookup, requestedUrls, billedCalls } = await flightAwareServer(context, {
+    FLIGHTAWARE_DAILY_LIMIT: "2",
+  });
 
   const automatic = await lookup("AAL100", false);
-  assert.equal(flightAwareCalls(), 0);
-  assert.equal(automatic.liveStatusAvailable, true);
+  assert.equal(billedCalls(), 0);
+  // Wait for the background usage check started by the automatic lookup.
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal((await lookup("AAL100", false)).liveStatusAvailable, true);
+  assert.equal(automatic.source, undefined);
 
   const manual = await lookup("AAL100", true);
   assert.equal(manual.source, "FlightAware");
@@ -336,14 +377,56 @@ test("FlightAware is used only for manual selections, cached, and capped per day
   );
 
   await lookup("AAL100", true);
-  assert.equal(flightAwareCalls(), 1, "a repeat lookup is served from cache");
+  assert.equal(billedCalls(), 1, "a repeat lookup is served from cache");
 
   await lookup("UAL1", true);
-  assert.equal(flightAwareCalls(), 2);
+  assert.equal(billedCalls(), 2);
 
   const overLimit = await lookup("DAL1", true);
-  assert.equal(flightAwareCalls(), 2, "the daily limit blocks further billed calls");
+  assert.equal(billedCalls(), 2, "the daily limit blocks further billed calls");
   assert.equal(overLimit.liveStatus, undefined);
   assert.equal(overLimit.liveStatusAvailable, false);
   assert.equal(requestedUrls.at(-1), "https://api.adsbdb.com/v0/callsign/DAL1");
+});
+
+test("FlightAware usage is read for this month and reported to the Roku", async (context) => {
+  const { baseUrl, lookup, requestedUrls } = await flightAwareServer(
+    context,
+    {},
+    { totalCost: 5.5 },
+  );
+  await lookup("AAL100", true);
+  const usageUrl = new URL(requestedUrls.find((url) => url.includes("/account/usage")));
+  assert.equal(usageUrl.searchParams.get("start"), `${new Date().toISOString().slice(0, 7)}-01`);
+  assert.equal(usageUrl.searchParams.get("all_keys"), "true");
+
+  const nearby = await (
+    await fetch(`${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=4`)
+  ).json();
+  // 5.50 reported plus one billed page since the reading, at 5.50 / 250 per page.
+  assert.deepEqual(nearby.flightAware, {
+    state: "warning",
+    monthToDateCost: 5.52,
+    warning: 5,
+    limit: 10,
+  });
+});
+
+test("FlightAware calls stop at the spend limit or when usage cannot be read", async (context) => {
+  const overLimit = await flightAwareServer(context, {}, { totalCost: 10.01 });
+  const limited = await overLimit.lookup("AAL100", true);
+  assert.equal(overLimit.billedCalls(), 0);
+  assert.equal(limited.source, undefined);
+  assert.equal(limited.liveStatusAvailable, false);
+
+  const unreadable = await flightAwareServer(context, {}, { usageStatus: 401 });
+  await unreadable.lookup("AAL100", true);
+  assert.equal(unreadable.billedCalls(), 0, "billed calls pause when spend is unknown");
+
+  assert.throws(
+    () =>
+      testConfig({ FLIGHTAWARE_API_SPEND_WARNING: "20", FLIGHTAWARE_API_SPEND_LIMIT: "10" }),
+    /SPEND_WARNING/,
+  );
+  assert.equal(testConfig({ FLIGHTAWARE_CACHE_TTL: "60" }).flightAwareCacheSeconds, 3600);
 });

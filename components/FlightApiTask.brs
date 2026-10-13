@@ -142,6 +142,7 @@ function FetchNearbyAircraft(params as object) as object
         counterAircraft: counterAircraft
         updatedAt: data.now
         source: StringOr(data.flightLaneSource, "")
+        flightAware: data.flightAware
     })
 end function
 

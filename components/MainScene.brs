@@ -29,6 +29,7 @@ sub init()
     m.closeupMarkerLayer = m.top.FindNode("closeupMarkerLayer")
     m.rangeLabel = m.top.FindNode("rangeLabel")
     m.dataSourceLabel = m.top.FindNode("dataSourceLabel")
+    m.spendNoticeLabel = m.top.FindNode("spendNoticeLabel")
     m.aircraftList = m.top.FindNode("aircraftList")
     m.emptyLabel = m.top.FindNode("emptyLabel")
     m.flyoverCountLabel = m.top.FindNode("flyoverCountLabel")
@@ -1165,6 +1166,35 @@ sub ShowDataSources(aircraftSource as string)
     m.dataSourceLabel.text = text
 end sub
 
+' Shows this month's FlightAware AeroAPI spend when the local service has a FlightAware key.
+sub ShowFlightAwareSpendNotice(spend as dynamic)
+    if Type(spend) <> "roAssociativeArray"
+        m.spendNoticeLabel.visible = false
+        return
+    end if
+
+    state = StringOr(spend.state, "")
+    cost = FormatDollars(spend.monthToDateCost)
+    limit = FormatDollars(spend.limit)
+    if state = "limit"
+        m.spendNoticeLabel.text = "FLIGHTAWARE LIMIT REACHED: " + cost + " OF " + limit + " — LIVE STATUS PAUSED"
+        m.spendNoticeLabel.color = "0xFCA5A5FF"
+    else if state = "warning"
+        m.spendNoticeLabel.text = "FLIGHTAWARE SPEND WARNING: " + cost + " THIS MONTH (LIMIT " + limit + ")"
+        m.spendNoticeLabel.color = "0xFBBF24FF"
+    else if state = "unavailable"
+        m.spendNoticeLabel.text = "FLIGHTAWARE USAGE UNAVAILABLE — LIVE STATUS PAUSED"
+        m.spendNoticeLabel.color = "0xFBBF24FF"
+    else if state = "checking"
+        m.spendNoticeLabel.text = "FlightAware: checking this month's usage…"
+        m.spendNoticeLabel.color = "0x8DA8C2FF"
+    else
+        m.spendNoticeLabel.text = "FlightAware: " + cost + " this month of " + limit + " limit"
+        m.spendNoticeLabel.color = "0x8DA8C2FF"
+    end if
+    m.spendNoticeLabel.visible = true
+end sub
+
 sub HandleNearbyResult(result as object)
     if result.ok <> true
         m.statusLabel.text = "DATA ERROR — " + result.errorMessage
@@ -1173,6 +1203,7 @@ sub HandleNearbyResult(result as object)
     end if
 
     ShowDataSources(StringOr(result.data.source, ""))
+    ShowFlightAwareSpendNotice(result.data.flightAware)
 
     counterAircraft = result.data.counterAircraft
     if counterAircraft = invalid

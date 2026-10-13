@@ -34,6 +34,21 @@ runMain(async () => {
         console.log(
           `     Maps=${health.features.satelliteMaps}, address lookup=${health.features.addressLookup}, flight details=${health.features.flightDetails}, photos=${health.features.aircraftPhotos}`,
         );
+        const spend = health.flightAwareSpend;
+        if (!spend) {
+          console.log("     FlightAware: off (no key; nothing is sent to FlightAware)");
+        } else if (spend.state === "limit" || spend.state === "unavailable") {
+          problems.push(
+            spend.state === "limit"
+              ? `FlightAware spend $${spend.monthToDateCost} reached the $${spend.limit} limit; live status is paused.`
+              : "FlightAware usage could not be read; live status is paused. Check FLIGHTAWARE_API_KEY.",
+          );
+        } else {
+          const cost = spend.monthToDateCost === undefined ? "checking" : `$${spend.monthToDateCost}`;
+          console.log(
+            `     FlightAware: ${spend.state}, ${cost} this month (warning $${spend.warning}, limit $${spend.limit})`,
+          );
+        }
       } else {
         problems.push("The local service health response was invalid.");
       }
