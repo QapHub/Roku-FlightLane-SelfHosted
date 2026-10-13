@@ -1679,8 +1679,18 @@ sub ShowFlightDetails(details as object)
     end if
     departureTime = PreferredTime(details.actualOff, details.estimatedOff, details.scheduledOff)
     arrivalTime = PreferredTime(details.actualOn, details.estimatedOn, details.scheduledOn)
-    m.departureValue.text = TimeLine("Takeoff", departureTime)
-    m.arrivalValue.text = TimeLine("Landing", arrivalTime)
+    ' Show only the times that are known, without leaving a gap.
+    lines = []
+    if departureTime <> ""
+        lines.Push("Takeoff: " + departureTime)
+    end if
+    if arrivalTime <> ""
+        lines.Push("Landing: " + arrivalTime)
+    end if
+    lines.Push("")
+    lines.Push("")
+    m.departureValue.text = lines[0]
+    m.arrivalValue.text = lines[1]
 end sub
 
 function PreferredTime(actualValue as dynamic, estimatedValue as dynamic, scheduledValue as dynamic) as string
@@ -1727,13 +1737,6 @@ function FriendlyTime(value as string) as string
         text = months[moment.GetMonth() - 1] + " " + moment.GetDayOfMonth().ToStr() + " " + text
     end if
     return text
-end function
-
-function TimeLine(label as string, value as string) as string
-    if value = ""
-        return label + ": unavailable"
-    end if
-    return label + ": " + value
 end function
 
 function VerticalRateLabel(rate as float) as string
