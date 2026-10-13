@@ -2,6 +2,11 @@ sub init()
     m.config = GetAppConfig()
     appInfo = CreateObject("roAppInfo")
     m.isScreensaver = appInfo.GetValue("screensaver_title") <> ""
+    versionText = "v" + appInfo.GetVersion()
+    if IsNonEmptyString(m.config.buildId)
+        versionText = versionText + " · " + m.config.buildId
+    end if
+    m.top.FindNode("versionLabel").text = versionText
     m.appTitle = m.top.FindNode("appTitle")
     m.subtitle = m.top.FindNode("subtitle")
     m.statusLabel = m.top.FindNode("statusLabel")
@@ -1243,6 +1248,7 @@ sub ApplyCompactFonts()
         dataSourceLabel: 22
         closeupImageryCredit: 20
         aircraftPhotoAttribution: 20
+        versionLabel: 16
     }
     for each id in sizes
         node = m.top.FindNode(id)

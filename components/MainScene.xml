@@ -145,6 +145,7 @@
             <Label translation="[1420,8]" width="300" height="48" text="CLOSE SETTINGS" color="0xFFFFFFFF" vertAlign="center" font="font:MediumBoldSystemFont" />
         </Group>
 
+        <Label id="versionLabel" translation="[1580,1056]" width="300" height="18" color="0x5F7A92FF" horizAlign="right" vertAlign="center" font="font:SmallestSystemFont" />
         <Label id="footerLabel" translation="[50,1027]" width="1820" height="38" visible="true" text="LOADING FLIGHT LANE…" color="0x8DA8C2FF" horizAlign="center" vertAlign="center" font="font:SmallSystemFont" />
         <Timer id="refreshTimer" repeat="true" duration="15" />
         <Timer id="motionTimer" repeat="true" duration="1" />

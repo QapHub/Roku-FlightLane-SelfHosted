@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,6 +27,15 @@ function readNumber(value, fallback) {
 
 function formatNumber(value, decimals) {
   return String(Number(value.toFixed(decimals)));
+}
+
+// Identifies the exact build on screen: the git commit, plus "+" for uncommitted changes.
+function gitBuildId() {
+  const run = (args) => spawnSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" });
+  const commit = run(["rev-parse", "--short", "HEAD"]);
+  if (commit.status !== 0) return "";
+  const dirty = run(["status", "--porcelain", "--untracked-files=no"]).stdout.trim() !== "";
+  return commit.stdout.trim() + (dirty ? "+" : "");
 }
 
 function brightScriptString(value) {
@@ -118,6 +128,7 @@ function GetAppConfig() as object
         closeupRadarPixelsPerFoot: ${formatNumber(closeupRadarPixelsPerFoot, 6)}
         closeupMaxZoom: ${closeupMaxZoom}
         flightLaneApiUrl: "${flightLaneApiUrl}"
+        buildId: "${brightScriptString(gitBuildId())}"
     }
 end function
 `;
