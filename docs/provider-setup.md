@@ -31,12 +31,24 @@ Each aircraft is drawn as a small icon pointing along its heading:
 | Icon | Shown for |
 | --- | --- |
 | Helicopter | ADS-B category A7 (rotorcraft), or a known helicopter type such as H60, B06, or EC35 |
-| Fighter jet | Aircraft flagged as military in the provider's database (red, including military helicopters) |
+| Fighter jet | Aircraft flagged as military in the provider's database (military helicopters use the helicopter icon) |
 | Airliner | Categories A3 to A6 (large, heavy, and high-performance) |
 | Ground vehicle | Categories C1 to C3 (airport vehicles and obstacles) |
 | Light aircraft | Categories A1 and A2, and anything unclassified |
 
-Icons are blue, red for military aircraft, and amber for the selected aircraft.
+Icons, trails, and projected paths are colored by altitude, with a key under the radar. Trails change color along their length as the aircraft climbs or descends. Yellow is reserved for the selected aircraft.
+
+| Altitude | Color |
+| --- | --- |
+| On the ground | Gray |
+| Below 1,000 ft | Red |
+| 1,000 to 3,000 ft | Orange |
+| 3,000 to 6,000 ft | Green |
+| 6,000 to 10,000 ft | Teal |
+| 10,000 to 20,000 ft | Sky blue |
+| 20,000 to 30,000 ft | Indigo |
+| 30,000 ft and above | Violet |
+| Selected aircraft | Yellow |
 
 ### Tracks on the radar
 

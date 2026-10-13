@@ -603,10 +603,20 @@ export class AircraftTrackHistory {
       const seen = Number(aircraft.seen_pos ?? aircraft.seen ?? 0);
       const time = now - (Number.isFinite(seen) ? seen * 1000 : 0);
       const track = Number(aircraft.track);
+      // Altitude in feet, or -1 on the ground, so trails can be colored by altitude.
+      const barometric = aircraft.alt_baro ?? aircraft.alt_geom;
+      const altitude =
+        String(barometric).toLowerCase() === "ground" ? -1 : Math.round(Number(barometric));
       const points = this.tracks.get(id) || [];
       const last = points[points.length - 1];
       if (last && time <= last.time + 500) continue;
-      points.push({ time, latitude, longitude, track: Number.isFinite(track) ? track : undefined });
+      points.push({
+        time,
+        latitude,
+        longitude,
+        track: Number.isFinite(track) ? track : undefined,
+        altitude: Number.isFinite(altitude) ? altitude : undefined,
+      });
       this.tracks.delete(id);
       this.tracks.set(id, points);
     }
@@ -623,7 +633,8 @@ export class AircraftTrackHistory {
     }
   }
 
-  // Earlier positions as [latitude, longitude, age in seconds], oldest first: about one every
+  // Earlier positions as [latitude, longitude, age in seconds, altitude in feet (-1 on the
+  // ground, null if unknown)], oldest first: about one every
   // 10 seconds, plus any point where the track turned, so curves keep their shape. The newest
   // position is the aircraft itself.
   trail(id, now = Date.now()) {
@@ -641,6 +652,7 @@ export class AircraftTrackHistory {
           rounded(point.latitude, 5),
           rounded(point.longitude, 5),
           Math.max(0, Math.round((now - point.time) / 1000)),
+          point.altitude ?? null,
         ]);
         anchor = point;
       }

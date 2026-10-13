@@ -235,3 +235,35 @@ function StepRadius(current as float, direction as integer, wrap as boolean) as 
     end if
     return options[index]
 end function
+
+' Altitude color bands as 0xRRGGBB, without alpha. They avoid yellow, which is reserved for the
+' selected aircraft (SelectedAircraftColor).
+function AltitudeBands() as object
+    return [
+        { label: "GND", maxFt: 0, color: "0x94A3B8" }
+        { label: "<1k", maxFt: 1000, color: "0xEF4444" }
+        { label: "3k", maxFt: 3000, color: "0xFB923C" }
+        { label: "6k", maxFt: 6000, color: "0x4ADE80" }
+        { label: "10k", maxFt: 10000, color: "0x2DD4BF" }
+        { label: "20k", maxFt: 20000, color: "0x38BDF8" }
+        { label: "30k", maxFt: 30000, color: "0x818CF8" }
+        { label: "30k+", maxFt: 999999, color: "0xD946EF" }
+    ]
+end function
+
+function AltitudeColor(altitudeFt as float, onGround as boolean) as string
+    bands = AltitudeBands()
+    if onGround or altitudeFt < 0
+        return bands[0].color
+    end if
+    for index = 1 to bands.Count() - 1
+        if altitudeFt < bands[index].maxFt
+            return bands[index].color
+        end if
+    end for
+    return bands[bands.Count() - 1].color
+end function
+
+function SelectedAircraftColor() as string
+    return "0xFDE047"
+end function

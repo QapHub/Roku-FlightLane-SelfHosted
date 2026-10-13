@@ -260,10 +260,19 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
                 if point.Count() >= 3
                     ageSeconds = NumberOr(point[2], 0)
                 end if
+                ' Altitude in feet, -1 on the ground; unknown points use the current altitude.
+                pointAltitude = altitudeFt
+                pointOnGround = onGround
+                if point.Count() >= 4 and IsNumericValue(point[3])
+                    pointAltitude = point[3]
+                    pointOnGround = point[3] < 0
+                end if
                 trail.Push({
                     northMiles: (point[0] - config.homeLatitude) * 69.0
                     eastMiles: (point[1] - config.homeLongitude) * 69.172 * Cos(latitudeRadians)
                     ageSeconds: ageSeconds
+                    altitudeFt: pointAltitude
+                    onGround: pointOnGround
                 })
             end if
         end for

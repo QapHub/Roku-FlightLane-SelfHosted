@@ -512,14 +512,27 @@ test("track history keeps a thinned trail and derives the turn rate", () => {
   // A right turn at 3 degrees per second, reported every 2 seconds for 60 seconds.
   for (let seconds = 0; seconds <= 60; seconds += 2) {
     history.record(
-      { ac: [{ hex: "A1B2C3", lat: 33 + seconds * 0.001, lon: -84, track: 90 + seconds * 3, seen_pos: 0 }] },
+      {
+        ac: [
+          {
+            hex: "A1B2C3",
+            lat: 33 + seconds * 0.001,
+            lon: -84,
+            track: 90 + seconds * 3,
+            alt_baro: seconds === 0 ? "ground" : 100 * seconds,
+            seen_pos: 0,
+          },
+        ],
+      },
       start + seconds * 1000,
     );
   }
 
   const trail = history.trail("a1b2c3");
   assert.ok(trail.length >= 6 && trail.length <= 30, `trail length ${trail.length}`);
-  assert.equal(trail[trail.length - 1].length, 3, "latitude, longitude, age");
+  assert.equal(trail[trail.length - 1].length, 4, "latitude, longitude, age, altitude");
+  assert.equal(trail[0][3], -1, "the first point was on the ground");
+  assert.ok(trail[trail.length - 1][3] > 0);
   assert.ok(trail[0][0] < trail[trail.length - 1][0], "oldest point first");
   assert.equal(history.turnRate("A1B2C3"), 3);
 

@@ -62,6 +62,7 @@ sub init()
     m.footerSettingsControls = m.top.FindNode("footerSettingsControls")
     m.footerLabel = m.top.FindNode("footerLabel")
     ApplyCompactFonts()
+    BuildAltitudeLegend()
     m.refreshTimer = m.top.FindNode("refreshTimer")
     m.motionTimer = m.top.FindNode("motionTimer")
     m.clockTimer = m.top.FindNode("clockTimer")
@@ -1271,6 +1272,48 @@ end function
 
 ' Built-in Roku fonts bottom out around 27px at 1080p, which truncates longer lines.
 ' Shrink the system font on labels that carry variable-length text.
+' Color key for the altitude bands, in the radar panel just above the range line.
+sub BuildAltitudeLegend()
+    panel = m.top.FindNode("mainPanel")
+    if panel = invalid
+        return
+    end if
+    legend = panel.CreateChild("Group")
+    legend.translation = [70, 906]
+    x = 0
+    for each band in AltitudeBands()
+        chip = legend.CreateChild("Rectangle")
+        chip.width = 12
+        chip.height = 12
+        chip.translation = [x, 6]
+        chip.color = band.color + "FF"
+        label = legend.CreateChild("Label")
+        label.translation = [x + 16, 0]
+        label.width = 50
+        label.height = 24
+        label.text = band.label
+        label.color = "0xBED3E6FF"
+        label.vertAlign = "center"
+        label.font = "font:SmallestSystemFont"
+        label.font.size = 16
+        x = x + 30 + (band.label.Len() * 9)
+    end for
+    chip = legend.CreateChild("Rectangle")
+    chip.width = 12
+    chip.height = 12
+    chip.translation = [x + 8, 6]
+    chip.color = SelectedAircraftColor() + "FF"
+    selectedLabel = legend.CreateChild("Label")
+    selectedLabel.translation = [x + 24, 0]
+    selectedLabel.width = 80
+    selectedLabel.height = 24
+    selectedLabel.text = "selected"
+    selectedLabel.color = "0xBED3E6FF"
+    selectedLabel.vertAlign = "center"
+    selectedLabel.font = "font:SmallestSystemFont"
+    selectedLabel.font.size = 16
+end sub
+
 sub ApplyCompactFonts()
     sizes = {
         statusLabel: 26
@@ -1992,7 +2035,7 @@ sub DrawCloseupPip()
     path.translation = [center, center - 2]
     path.scaleRotateCenter = [0, 2]
     path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
-    path.color = "0xFBBF24CC"
+    path.color = SelectedAircraftColor() + "CC"
 
     marker = CreateObject("roSGNode", "Group")
     marker.translation = [center, center]
@@ -2045,15 +2088,17 @@ sub DrawAircraftTrail(parent as object, aircraft as object, selected as boolean,
     if points.Count() = 0
         return
     end if
-    points.Push({ eastMiles: aircraft.eastMiles, northMiles: aircraft.northMiles })
+    points.Push({ eastMiles: aircraft.eastMiles, northMiles: aircraft.northMiles, altitudeFt: aircraft.altitudeFt, onGround: aircraft.onGround })
 
+    ' Each segment takes the altitude color of its newer end; the selected aircraft is yellow.
     segmentCount = points.Count() - 1
     for index = 0 to segmentCount - 1
-        alpha = Int(40 + (150 * (index + 1) / segmentCount))
+        alpha = Int(60 + (170 * (index + 1) / segmentCount))
         if selected
-            color = "0xFBBF24" + ByteHex(alpha)
+            color = SelectedAircraftColor() + ByteHex(alpha)
         else
-            color = "0x7DD3FC" + ByteHex(Int(alpha * 0.6))
+            newer = points[index + 1]
+            color = AltitudeColor(NumberOr(newer.altitudeFt, 0), IsTrue(newer.onGround)) + ByteHex(Int(alpha * 0.75))
         end if
         AddLineSegment(parent, center + (points[index].eastMiles * scale), center - (points[index].northMiles * scale), center + (points[index + 1].eastMiles * scale), center - (points[index + 1].northMiles * scale), color, 2)
     end for
@@ -2068,11 +2113,11 @@ function DrawProjectedPath(marker as object, aircraft as object, position as obj
         return path
     end if
     horizon = 60
-    color = "0x38BDF855"
+    color = AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "77"
     thickness = 3
     if selected
         horizon = 90
-        color = "0xFBBF2488"
+        color = SelectedAircraftColor() + "AA"
     end if
     heading = NumberOr(position.heading, aircraft.heading)
     previousX = 0.0
@@ -2092,7 +2137,7 @@ function DrawProjectedPath(marker as object, aircraft as object, position as obj
 end function
 
 ' Adds a heading-rotated icon for the aircraft's class (airliner, light, military, rotorcraft,
-' ground), tinted amber when selected, red when military, and blue otherwise.
+' ground), tinted by altitude band, or yellow when selected.
 function AddAircraftIcon(parent as object, aircraft as object, heading as float, size as integer, selected as boolean) as object
     icon = parent.CreateChild("Poster")
     icon.uri = "pkg:/images/aircraft-" + StringOr(aircraft.kind, "light") + ".png"
@@ -2102,11 +2147,9 @@ function AddAircraftIcon(parent as object, aircraft as object, heading as float,
     icon.scaleRotateCenter = [size / 2, size / 2]
     icon.rotation = HeadingRotation(heading)
     if selected
-        icon.blendColor = "0xFBBF24FF"
-    else if IsTrue(aircraft.military)
-        icon.blendColor = "0xF87171FF"
+        icon.blendColor = SelectedAircraftColor() + "FF"
     else
-        icon.blendColor = "0x38BDF8FF"
+        icon.blendColor = AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "FF"
     end if
     return icon
 end function
