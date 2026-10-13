@@ -1933,21 +1933,14 @@ sub DrawRadar()
             marker.translation = [center + (position.eastMiles * scale), center - (position.northMiles * scale)]
             path = DrawProjectedPath(marker, aircraft, position, selected, scale)
 
-            dot = marker.CreateChild("Rectangle")
+            iconSize = 30
             if selected
-                dot.width = 22
-                dot.height = 22
-                dot.translation = [-11, -11]
-                dot.color = "0xFBBF24FF"
-            else
-                dot.width = 14
-                dot.height = 14
-                dot.translation = [-7, -7]
-                dot.color = "0x38BDF8FF"
+                iconSize = 40
             end if
+            icon = AddAircraftIcon(marker, aircraft, NumberOr(position.heading, aircraft.heading), iconSize, selected)
 
             label = marker.CreateChild("Label")
-            label.translation = [16, -20]
+            label.translation = [iconSize / 2 + 4, -22]
             label.width = 190
             label.height = 40
             label.text = aircraft.callsign
@@ -1958,7 +1951,7 @@ sub DrawRadar()
             end if
 
             m.markerLayer.AppendChild(marker)
-            m.radarMarkers.Push({ group: marker, path: path, aircraftIndex: index })
+            m.radarMarkers.Push({ group: marker, path: path, icon: icon, aircraftIndex: index })
         end for
     end if
 
@@ -2003,11 +1996,7 @@ sub DrawCloseupPip()
 
     marker = CreateObject("roSGNode", "Group")
     marker.translation = [center, center]
-    dot = marker.CreateChild("Rectangle")
-    dot.width = 18
-    dot.height = 18
-    dot.translation = [-9, -9]
-    dot.color = "0xFBBF24FF"
+    icon = AddAircraftIcon(marker, aircraft, aircraft.heading, 34, true)
     m.closeupMarkerLayer.AppendChild(marker)
 
     home = CreateObject("roSGNode", "Group")
@@ -2028,6 +2017,7 @@ sub DrawCloseupPip()
     m.closeupMarkerRecord = {
         group: marker
         path: path
+        icon: icon
         home: home
         aircraftIndex: m.selectedIndex
     }
@@ -2101,6 +2091,31 @@ function DrawProjectedPath(marker as object, aircraft as object, position as obj
     return path
 end function
 
+' Adds a heading-rotated icon for the aircraft's class (airliner, light, military, rotorcraft,
+' ground), tinted amber when selected, red when military, and blue otherwise.
+function AddAircraftIcon(parent as object, aircraft as object, heading as float, size as integer, selected as boolean) as object
+    icon = parent.CreateChild("Poster")
+    icon.uri = "pkg:/images/aircraft-" + StringOr(aircraft.kind, "light") + ".png"
+    icon.width = size
+    icon.height = size
+    icon.translation = [-size / 2, -size / 2]
+    icon.scaleRotateCenter = [size / 2, size / 2]
+    icon.rotation = HeadingRotation(heading)
+    if selected
+        icon.blendColor = "0xFBBF24FF"
+    else if IsTrue(aircraft.military)
+        icon.blendColor = "0xF87171FF"
+    else
+        icon.blendColor = "0x38BDF8FF"
+    end if
+    return icon
+end function
+
+' Icons point north; SceneGraph rotates counterclockwise, compass headings run clockwise.
+function HeadingRotation(heading as float) as float
+    return -heading * 3.14159265358979 / 180
+end function
+
 ' SceneGraph has no line primitive, so a segment is a thin rectangle rotated about its start.
 sub AddLineSegment(parent as object, x1 as float, y1 as float, x2 as float, y2 as float, color as string, thickness as integer)
     dx = x2 - x1
@@ -2145,6 +2160,9 @@ sub AnimateRadarMarkers()
             markerRecord.group.visible = distanceMiles <= m.config.radiusMiles
             if markerRecord.group.visible
                 markerRecord.group.translation = [center + (position.eastMiles * scale), center - (position.northMiles * scale)]
+                if markerRecord.icon <> invalid
+                    markerRecord.icon.rotation = HeadingRotation(NumberOr(position.heading, aircraft.heading))
+                end if
             end if
         end if
     end for
@@ -2189,6 +2207,7 @@ sub PositionCloseupPip()
     center = m.config.closeupViewportSize / 2
     m.closeupMarkerRecord.group.translation = [center, center]
     m.closeupMarkerRecord.path.rotation = (90 - NumberOr(position.heading, aircraft.heading)) * 3.14159265358979 / 180
+    m.closeupMarkerRecord.icon.rotation = HeadingRotation(NumberOr(position.heading, aircraft.heading))
 
     radiusMiles = m.config.closeupRadiusFeet / 5280.0
     homeEastMiles = 0 - position.eastMiles

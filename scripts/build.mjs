@@ -4,7 +4,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
 import { REPO_ROOT, parseArgs, readEnvFile, resolveEnvPath, runMain } from "./lib/common.mjs";
-import { createRadarPng, createSolidJpeg } from "./lib/images.mjs";
+import {
+  AIRCRAFT_ICON_KINDS,
+  createAircraftIconPng,
+  createRadarPng,
+  createSolidJpeg,
+} from "./lib/images.mjs";
 import { createZip } from "./lib/zip.mjs";
 
 const STATIC_ASSET_NAMES = [
@@ -153,6 +158,11 @@ end function
   fs.mkdirSync(imageRoot, { recursive: true });
   fs.writeFileSync(mapBackdropPath, createSolidJpeg(840, 840, [8, 24, 39]));
   fs.writeFileSync(radarImagePath, createRadarPng(390.0));
+  const aircraftIconPaths = AIRCRAFT_ICON_KINDS.map((kind) => {
+    const iconPath = path.join(imageRoot, `aircraft-${kind}.png`);
+    fs.writeFileSync(iconPath, createAircraftIconPng(kind));
+    return iconPath;
+  });
 
   if (!stageRoot.startsWith(REPO_ROOT + path.sep)) {
     throw new Error("Refusing to clean a staging path outside the repository.");
@@ -165,7 +175,7 @@ end function
   fs.cpSync(path.join(REPO_ROOT, "components"), path.join(stageRoot, "components"), { recursive: true });
   const stageImages = path.join(stageRoot, "images");
   fs.mkdirSync(stageImages, { recursive: true });
-  for (const imagePath of [radarImagePath, mapBackdropPath]) {
+  for (const imagePath of [radarImagePath, mapBackdropPath, ...aircraftIconPaths]) {
     fs.copyFileSync(imagePath, path.join(stageImages, path.basename(imagePath)));
   }
   for (const staticAssetName of STATIC_ASSET_NAMES) {

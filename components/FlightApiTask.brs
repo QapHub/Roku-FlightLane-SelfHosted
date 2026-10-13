@@ -239,6 +239,8 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
     end if
 
     operatorName = StringOr(rawAircraft.ownOp, "")
+    military = (Int(NumberOr(rawAircraft.dbFlags, 0)) and 1) = 1
+    kind = AircraftKind(StringOr(rawAircraft.category, ""), StringOr(rawAircraft.t, ""), military)
     airline = AirlineIdentity(callsign, operatorName)
     phase = EstimatePhase(onGround, altitudeFt, verticalRate)
     turnRate = NumberOr(rawAircraft.fl_turn_rate, 0)
@@ -278,6 +280,8 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
         callsign: callsign
         registration: registration
         aircraftType: StringOr(rawAircraft.t, "")
+        kind: kind
+        military: military
         aircraftDescription: StringOr(rawAircraft.desc, "")
         operatorName: operatorName
         airlineName: airline.name
@@ -305,6 +309,40 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
         squawk: StringOr(rawAircraft.squawk, "")
         sourceAgeSeconds: sourceAgeSeconds
     }
+end function
+
+'
+' Icon class from the ADS-B emitter category, ICAO type, and the military flag (dbFlags bit 1):
+' rotorcraft, military, airliner, light, or ground.
+function AircraftKind(category as string, typeCode as string, military as boolean) as string
+    category = UCase(category)
+    if category = "A7" or IsHelicopterType(typeCode)
+        return "rotorcraft"
+    end if
+    if military
+        return "military"
+    end if
+    if category = "A3" or category = "A4" or category = "A5" or category = "A6"
+        return "airliner"
+    end if
+    if category = "C1" or category = "C2" or category = "C3"
+        return "ground"
+    end if
+    return "light"
+end function
+
+' Common helicopter ICAO type designators, for aircraft that report no emitter category.
+function IsHelicopterType(typeCode as string) as boolean
+    helicopterTypes = {
+        AS50: true, AS55: true, AS65: true, A109: true, A119: true, A139: true, A169: true
+        B06: true, B06T: true, B407: true, B412: true, B429: true, B505: true
+        EC20: true, EC25: true, EC30: true, EC35: true, EC45: true, EC55: true, EC75: true
+        H125: true, H130: true, H135: true, H145: true, H155: true, H160: true, H175: true
+        H47: true, H53: true, H60: true, H64: true, H72: true, H269: true, H500: true
+        MD52: true, MD60: true, MD90: true, R22: true, R44: true, R66: true
+        S76: true, S92: true, UH1: true, UH1Y: true, AH1: true, BK17: true
+    }
+    return helicopterTypes.DoesExist(UCase(typeCode))
 end function
 
 function AirlineIdentity(callsign as string, operatorName as string) as object

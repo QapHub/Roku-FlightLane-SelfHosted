@@ -24,6 +24,20 @@ Provider limits differ:
 - Both are free community services, and other ADS-B tools on the same internet connection share the allowance. If you see frequent `provider_cooldown` messages, choose a longer polling interval (10 seconds still gives useful trails).
 - Airplanes.live now refuses API requests (HTTP 403) unless you contact them for access, so it is no longer a default fallback. If you are granted access, set `AIRCRAFT_API_BASE_URL=https://api.airplanes.live/v2` and follow their published limits.
 
+### Aircraft icons
+
+Each aircraft is drawn as a small icon pointing along its heading:
+
+| Icon | Shown for |
+| --- | --- |
+| Helicopter | ADS-B category A7 (rotorcraft), or a known helicopter type such as H60, B06, or EC35 |
+| Fighter jet | Aircraft flagged as military in the provider's database (red, including military helicopters) |
+| Airliner | Categories A3 to A6 (large, heavy, and high-performance) |
+| Ground vehicle | Categories C1 to C3 (airport vehicles and obstacles) |
+| Light aircraft | Categories A1 and A2, and anything unclassified |
+
+Icons are blue, red for military aircraft, and amber for the selected aircraft.
+
 ### Tracks on the radar
 
 The local service keeps each aircraft's reported positions for five minutes, in memory only. Each refresh sends the Roku a thinned trail (about one point every 10 seconds, plus points where the aircraft turned) and a turn rate worked out from its recent tracks. The Roku draws:

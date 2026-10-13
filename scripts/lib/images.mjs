@@ -121,6 +121,88 @@ class Canvas {
   }
 }
 
+function insidePolygon(x, y, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const [xi, yi] = points[i];
+    const [xj, yj] = points[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Antialiased polygon fill: coverage from a 4x4 grid of samples per pixel.
+function fillPolygon(canvas, points, color) {
+  const xs = points.map(([x]) => x);
+  const ys = points.map(([, y]) => y);
+  const minX = Math.max(0, Math.floor(Math.min(...xs)));
+  const maxX = Math.min(canvas.width - 1, Math.ceil(Math.max(...xs)));
+  const minY = Math.max(0, Math.floor(Math.min(...ys)));
+  const maxY = Math.min(canvas.height - 1, Math.ceil(Math.max(...ys)));
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      let hits = 0;
+      for (let sy = 0; sy < 4; sy += 1) {
+        for (let sx = 0; sx < 4; sx += 1) {
+          if (insidePolygon(x + (sx + 0.5) / 4, y + (sy + 0.5) / 4, points)) hits += 1;
+        }
+      }
+      canvas.blend(x, y, color, hits / 16);
+    }
+  }
+}
+
+function circlePolygon(cx, cy, rx, ry = rx, steps = 32) {
+  return Array.from({ length: steps }, (_, index) => {
+    const angle = (index / steps) * Math.PI * 2;
+    return [cx + rx * Math.cos(angle), cy + ry * Math.sin(angle)];
+  });
+}
+
+// White silhouettes on a 64x64 canvas, nose pointing up (north), so the Roku can rotate
+// them to the aircraft's heading and tint them with blendColor.
+const AIRCRAFT_ICON_SHAPES = {
+  airliner: [
+    [[30, 4], [34, 4], [35, 9], [35, 55], [32, 60], [29, 55], [29, 9]],
+    [[29, 23], [35, 23], [61, 39], [61, 44], [35, 35], [29, 35], [3, 44], [3, 39]],
+    [[29, 49], [35, 49], [46, 57], [46, 61], [35, 57], [29, 57], [18, 61], [18, 57]],
+  ],
+  light: [
+    [[30, 5], [34, 5], [35, 12], [34, 55], [30, 55], [29, 12]],
+    [[3, 19], [61, 19], [61, 28], [3, 28]],
+    [[19, 49], [45, 49], [45, 56], [19, 56]],
+  ],
+  military: [
+    [
+      [32, 2], [36, 15], [37, 27], [59, 47], [59, 52], [38, 47], [38, 53], [47, 59], [47, 62],
+      [32, 58], [17, 62], [17, 59], [26, 53], [26, 47], [5, 52], [5, 47], [27, 27], [28, 15],
+    ],
+  ],
+  rotorcraft: [
+    circlePolygon(32, 27, 9, 12),
+    [[30, 36], [34, 36], [33, 58], [31, 58]],
+    [[24, 54], [40, 54], [40, 58], [24, 58]],
+  ],
+  ground: [
+    [[22, 14], [42, 14], [44, 18], [44, 50], [40, 52], [24, 52], [20, 50], [20, 18]],
+  ],
+};
+
+export function createAircraftIconPng(kind, size = 64) {
+  const canvas = new Canvas(size, size);
+  const scale = size / 64;
+  for (const polygon of AIRCRAFT_ICON_SHAPES[kind]) {
+    fillPolygon(canvas, polygon.map(([x, y]) => [x * scale, y * scale]), [255, 255, 255, 255]);
+  }
+  if (kind === "rotorcraft") {
+    // Rotor disc.
+    canvas.circle(32 * scale, 27 * scale, 26 * scale, [255, 255, 255, 170], 3 * scale);
+  }
+  return encodePng(size, size, canvas.pixels);
+}
+
+export const AIRCRAFT_ICON_KINDS = Object.keys(AIRCRAFT_ICON_SHAPES);
+
 export function createRadarPng(outerRadius, size = 840) {
   const canvas = new Canvas(size, size);
   const minor = [125, 211, 252, 115];
