@@ -19,12 +19,9 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
     baseUrl: "https://opendata.adsb.fi/api/v3",
     pathStyle: "named",
   },
-  {
-    name: "airplanes.live",
-    baseUrl: "https://api.airplanes.live/v2",
-    pathStyle: "positional",
-  },
 ];
+// After a refusal, skip a provider for a while instead of retrying it on every refresh.
+const PROVIDER_COOLDOWN_MS = { rateLimited: 30 * 1000, forbidden: 30 * 60 * 1000, failed: 30 * 1000 };
 const FLIGHT_ROUTE_API = "https://api.adsbdb.com/v0/callsign";
 // Optional, billed per query. Used only for manually selected aircraft and capped per day.
 const FLIGHTAWARE_FLIGHTS_API = "https://aeroapi.flightaware.com/aeroapi/flights";
@@ -39,7 +36,9 @@ const IMAGERY_EXPORT_API =
 const IMAGERY_ATTRIBUTION = "USDA, USGS The National Map";
 const WEB_MERCATOR_RADIUS_METERS = 6378137;
 const AIRCRAFT_PHOTO_API = "https://api.planespotters.net/pub/photos/reg";
-const USER_AGENT = "FlightLaneSelfHosted/1.0";
+// Planespotters (and good API etiquette) require a contact URL in server User-Agents.
+const USER_AGENT =
+  "FlightLaneSelfHosted/1.0 (+https://github.com/QapHub/Roku-FlightLane-SelfHosted)";
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_MAP_BYTES = 8 * 1024 * 1024;
 const MAP_CACHE_MAX_ENTRIES = 200;
@@ -465,6 +464,25 @@ function logAircraftProviderFailure(provider, providerStatus, reason = "http_err
   );
 }
 
+function coolDownProvider(cooldowns, provider, status) {
+  if (!cooldowns) return;
+  const duration =
+    status === 403
+      ? PROVIDER_COOLDOWN_MS.forbidden
+      : status === 429
+        ? PROVIDER_COOLDOWN_MS.rateLimited
+        : PROVIDER_COOLDOWN_MS.failed;
+  cooldowns.set(provider.name, Date.now() + duration);
+  console.error(
+    JSON.stringify({
+      event: "provider_cooldown",
+      feature: "Aircraft data",
+      provider: provider.name,
+      seconds: duration / 1000,
+    }),
+  );
+}
+
 export async function fetchAircraftPositionsFromProviders({
   fetchImpl = globalThis.fetch,
   providers,
@@ -472,9 +490,13 @@ export async function fetchAircraftPositionsFromProviders({
   longitude,
   radiusNauticalMiles,
   timeoutMs,
+  cooldowns,
 }) {
   const failures = [];
-  for (const provider of providers) {
+  const now = Date.now();
+  const ready = providers.filter((provider) => !(cooldowns?.get(provider.name) > now));
+  // If every provider is cooling down, try them all rather than return nothing.
+  for (const provider of ready.length > 0 ? ready : providers) {
     const providerUrl = aircraftProviderUrl(
       provider,
       latitude,
@@ -489,16 +511,20 @@ export async function fetchAircraftPositionsFromProviders({
       if (!upstream.ok) {
         failures.push({ provider: provider.name, status: upstream.status });
         logAircraftProviderFailure(provider.name, upstream.status);
+        coolDownProvider(cooldowns, provider, upstream.status);
         continue;
       }
       if (!isAircraftPositionPayload(upstream.data)) {
         failures.push({ provider: provider.name, status: 502 });
         logAircraftProviderFailure(provider.name, 502, "invalid_payload");
+        coolDownProvider(cooldowns, provider, 502);
         continue;
       }
+      cooldowns?.delete(provider.name);
       return { payload: upstream.data, provider: provider.name, failures };
     } catch (error) {
       failures.push({ provider: provider.name });
+      coolDownProvider(cooldowns, provider, 0);
       console.error(
         JSON.stringify({
           event: "provider_request_failed",
@@ -599,6 +625,7 @@ export function createFlightLaneServer({
 } = {}) {
   if (!config) throw new Error("A server configuration is required.");
   const nearbyCache = new TtlCache();
+  const providerCooldowns = new Map();
   const detailsCache = new TtlCache();
   const geocodeCache = new TtlCache();
   const mapCache = new TtlCache({ maxEntries: MAP_CACHE_MAX_ENTRIES });
@@ -864,6 +891,7 @@ export function createFlightLaneServer({
               longitude: roundedLongitude,
               radiusNauticalMiles: rounded(radiusNauticalMiles, 3),
               timeoutMs: config.timeoutMs,
+              cooldowns: providerCooldowns,
             });
             if (result.payload === undefined || !result.provider) {
               const lastFailure = result.failures[result.failures.length - 1];

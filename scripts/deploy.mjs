@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import process from "node:process";
 import {
   parseArgs,
   promptHidden,
@@ -49,6 +50,11 @@ runMain(async () => {
   });
 
   if (exitCode !== 0) {
+    if (exitCode === 7 && process.platform === "darwin") {
+      throw new Error(
+        `Could not connect to the Roku at ${rokuIp}. If the Roku's developer page opens in your browser, macOS is blocking this terminal app: enable it under System Settings > Privacy & Security > Local Network, then quit and reopen it. You can also upload ${packagePath} through the developer page.`,
+      );
+    }
     if (exitCode === 22) {
       throw new Error(
         "Roku sideload was rejected. Confirm the Roku developer username is rokudev and re-enter the case-sensitive developer password shown/created in developer mode.",

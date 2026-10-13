@@ -91,7 +91,7 @@ The local service:
 - validates every coordinate, radius, zoom, callsign, and registration;
 - limits request and response sizes;
 - keeps short-lived data in memory to reduce duplicate provider calls;
-- tries ADSB.fi and Airplanes.live if the configured live-aircraft provider is unavailable;
+- tries ADSB.lol and ADSB.fi if the configured live-aircraft provider is unavailable;
 - does not write addresses, coordinates, device identifiers, or provider responses to disk;
 - reports only feature availability from `/health`.
 
@@ -101,13 +101,13 @@ Never forward port `8787` from your router or expose it directly to the internet
 
 The Roku can refresh its local display more often than the service calls a provider. `REFRESH_SECONDS` controls Roku-to-computer refreshes; `AIRCRAFT_CACHE_SECONDS` controls upstream live-aircraft refreshes.
 
-Flight Lane tries the configured live-aircraft provider (ADSB.lol by default) first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi and then Airplanes.live. A 15-second cache makes at most 5,760 upstream calls during 24 hours of continuous use. See [Provider setup](docs/provider-setup.md) for each provider's limits before leaving the app running continuously.
+Flight Lane tries the configured live-aircraft provider (ADSB.lol by default) first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi. A provider that refuses requests is skipped for a while (30 seconds after rate limiting, 30 minutes after a 403) instead of being retried on every refresh. A 15-second cache makes at most 5,760 upstream calls during 24 hours of continuous use. See [Provider setup](docs/provider-setup.md) for each provider's limits before leaving the app running continuously.
 
 Every data provider Flight Lane uses by default is free and needs no account or key:
 
 | Data | Provider |
 | --- | --- |
-| Live aircraft positions | ADSB.lol, with ADSB.fi and Airplanes.live as fallbacks |
+| Live aircraft positions | ADSB.lol, with ADSB.fi as fallback |
 | Satellite imagery | USDA / USGS The National Map (public domain, US coverage) |
 | Address lookup | US Census Bureau geocoder (US addresses) |
 | Flight routes (optional) | adsbdb.com |
@@ -124,7 +124,7 @@ A Roku holds only one sideloaded development app at a time. Installing another d
 
 The street address is sent from the Roku to your computer and forwarded only to the US Census Bureau geocoder. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
 
-Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.fi or Airplanes.live. Map coordinates are sent to the USGS National Map. A selected callsign may be sent to adsbdb.com (and, if you add a FlightAware key, a manually selected callsign to FlightAware), and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
+Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.lol or ADSB.fi. Map coordinates are sent to the USGS National Map. A selected callsign may be sent to adsbdb.com (and, if you add a FlightAware key, a manually selected callsign to FlightAware), and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
 
 Flight Lane contains no analytics or advertising SDK. See [SECURITY.md](SECURITY.md) for security guidance.
 

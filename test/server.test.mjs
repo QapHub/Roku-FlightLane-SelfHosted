@@ -54,7 +54,7 @@ test("createConfig defaults to free providers with optional lookups enabled", ()
   assert.equal(config.localNetworkOnly, true);
   assert.deepEqual(
     config.aircraftProviders.map((provider) => provider.name),
-    ["adsb.lol", "adsb.fi", "airplanes.live"],
+    ["adsb.lol", "adsb.fi"],
   );
 });
 
@@ -161,31 +161,42 @@ test("nearby requests fall back when the configured aircraft provider fails", as
   assert.equal(requestedUrls[1], "https://opendata.adsb.fi/api/v3/lat/28.5/lon/-81.6/dist/3.476");
 });
 
-test("aircraft provider fallback reaches Airplanes.live after both ADSB providers fail", async () => {
+test("aircraft providers that refuse requests are skipped while cooling down", async () => {
   const requestedUrls = [];
   const fetchImpl = async (url) => {
     requestedUrls.push(String(url));
-    if (requestedUrls.length < 3) {
+    if (String(url).includes("adsb.lol")) {
       return new Response(JSON.stringify({ error: "busy" }), { status: 429 });
     }
     return Response.json({ ac: [], now: 1234567890000 });
   };
+  const cooldowns = new Map();
+  const request = () =>
+    fetchAircraftPositionsFromProviders({
+      fetchImpl,
+      providers: testConfig().aircraftProviders,
+      latitude: 28.5,
+      longitude: -81.6,
+      radiusNauticalMiles: 3.476,
+      timeoutMs: 1000,
+      cooldowns,
+    });
 
-  const result = await fetchAircraftPositionsFromProviders({
-    fetchImpl,
-    providers: testConfig().aircraftProviders,
-    latitude: 28.5,
-    longitude: -81.6,
-    radiusNauticalMiles: 3.476,
-    timeoutMs: 1000,
-  });
+  assert.equal((await request()).provider, "adsb.fi");
+  assert.equal(requestedUrls.length, 2);
+  assert.equal((await request()).provider, "adsb.fi");
+  assert.equal(requestedUrls.length, 3, "rate-limited ADSB.lol is not retried immediately");
+  assert.match(requestedUrls[2], /opendata\.adsb\.fi/);
+  assert.ok(cooldowns.get("adsb.lol") > Date.now());
+});
 
-  assert.equal(result.provider, "airplanes.live");
-  assert.deepEqual(result.failures, [
-    { provider: "adsb.lol", status: 429 },
-    { provider: "adsb.fi", status: 429 },
-  ]);
-  assert.equal(requestedUrls[2], "https://api.airplanes.live/v2/point/28.5/-81.6/3.476");
+test("a configured Airplanes.live provider falls back to the ADSB providers", () => {
+  assert.deepEqual(
+    testConfig({ AIRCRAFT_API_BASE_URL: "https://api.airplanes.live/v2" }).aircraftProviders.map(
+      (provider) => provider.name,
+    ),
+    ["airplanes.live", "adsb.lol", "adsb.fi"],
+  );
 });
 
 test("Census geocoding returns the response shape the Roku parses", async (context) => {

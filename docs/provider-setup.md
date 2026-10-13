@@ -4,7 +4,7 @@ Provider products, allowances, prices, and license terms can change. Check each 
 
 ## Live aircraft positions
 
-Flight Lane defaults to the [ADSB.lol API](https://api.adsb.lol/docs) point endpoint. ADSB.lol publishes its data under the Open Database License (ODbL) and needs no key; the Roku credits it under the radar whenever it supplies the positions shown. If the configured provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi and then Airplanes.live.
+Flight Lane defaults to the [ADSB.lol API](https://api.adsb.lol/docs) point endpoint. ADSB.lol publishes its data under the Open Database License (ODbL) and needs no key; the Roku credits it under the radar whenever it supplies the positions shown. If the configured provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi. A provider that refuses a request is skipped for 30 seconds after a 429 or error, or 30 minutes after a 403, so the service does not retry it on every refresh.
 
 Relevant `.env.local` settings:
 
@@ -19,8 +19,8 @@ Backup provider requests use the same rounded location, radius, timeout, and cac
 
 Provider limits differ:
 
-- ADSB.lol and ADSB.fi do not currently publish a fixed daily allowance, but may throttle heavy use. ADSB.fi asks for no more than one request per second.
-- Airplanes.live lists a one-request-per-second limit, 500 requests per day for free access, and 8,640 per day for contributor access. If you set it as your primary provider, use an `AIRCRAFT_CACHE_SECONDS` of 180 or more on free access.
+- ADSB.lol and ADSB.fi do not publish a fixed daily allowance but rate-limit bursts; in testing, a few requests in quick succession returned 429, while one request every couple of seconds did not. The default 15-second cache stays well under that. Running other ADS-B tools from the same internet connection shares the same allowance.
+- Airplanes.live now refuses API requests (HTTP 403) unless you contact them for access, so it is no longer a default fallback. If you are granted access, set `AIRCRAFT_API_BASE_URL=https://api.airplanes.live/v2` and follow their published limits.
 
 The interface animates projected motion between responses, but a longer cache means less authoritative position correction.
 

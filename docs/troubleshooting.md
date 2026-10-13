@@ -50,7 +50,8 @@ npm run diagnose
 
 - Verify the selected radius in app settings.
 - Check that the live-aircraft provider covers the area.
-- If ADSB.lol is unavailable, the local service should try ADSB.fi and Airplanes.live automatically. Watch the `npm run api` terminal for `provider_fallback` messages.
+- If ADSB.lol is unavailable, the local service should try ADSB.fi automatically. Watch the `npm run api` terminal for `provider_fallback` and `provider_cooldown` messages. A 429 means the provider is rate-limiting your internet connection; a 403 from Airplanes.live means it requires approved access.
+- If `.env.local` sets `AIRCRAFT_API_BASE_URL=https://api.airplanes.live/v2` and you have not been granted access, change it to `https://api.adsb.lol/v2`.
 - Keep the app open through another refresh cycle.
 - Set `AIRCRAFT_CACHE_SECONDS` within your provider allowance. Longer values reduce upstream usage but delay authoritative corrections.
 - Use `npm run debug` and look for the sanitized nearby-provider HTTP status and raw/usable counts.
@@ -66,6 +67,14 @@ Small aircraft may not broadcast usable ADS-B positions, may be outside receiver
   - `FlightAware API: $X of $Y · paused` (red): month-to-date spend reached `FLIGHTAWARE_API_SPEND_LIMIT`. Raise the limit or wait for the next month.
   - `FlightAware API: usage unknown · paused`: the usage endpoint could not be read for 30 minutes, so billed lookups are paused. Look for `"feature":"FlightAware usage"` errors; a 401 or 403 usually means the key is wrong or billing is not set up.
   - `flightaware_daily_limit_reached` in the terminal: `FLIGHTAWARE_DAILY_LIMIT` was reached for the UTC day.
+
+## `npm run deploy` cannot connect on macOS
+
+`curl: (7) Failed to connect to <ROKU_IP> port 80 after 1 ms` while the Roku developer page opens in your browser means macOS is blocking your terminal app from the local network. Open **System Settings > Privacy & Security > Local Network**, enable your terminal app (Terminal, iTerm, VS Code, and so on), then quit and reopen it. Until then, run `npm run build` and upload `dist/flight-lane.zip` through the developer page.
+
+## The Roku still shows old text after an update
+
+The Roku runs whatever ZIP was last installed. Run `npm run build` (or `npm run deploy`) after pulling changes, and upload the new `dist/flight-lane.zip`; uploading an older ZIP keeps the older app. Restart `npm run api` too, so the local service runs the new code.
 
 ## Another development app disappeared
 
