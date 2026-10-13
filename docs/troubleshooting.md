@@ -2,7 +2,7 @@
 
 Start with:
 
-```powershell
+```sh
 npm run diagnose
 ```
 
@@ -12,7 +12,11 @@ npm run diagnose
 - Confirm `.env.local` exists.
 - Check whether another process is using port 8787:
 
-  ```powershell
+  ```sh
+  # macOS / Linux
+  lsof -nP -iTCP:8787 -sTCP:LISTEN
+
+  # Windows PowerShell
   Get-NetTCPConnection -LocalPort 8787 -ErrorAction SilentlyContinue
   ```
 
@@ -24,7 +28,9 @@ npm run diagnose
 - Use the computer's LAN address—not `localhost`—for `FLIGHTLANE_API_URL`.
 - Confirm the Roku and computer are on the same non-guest network.
 - Disconnect a VPN temporarily if it blocks local networking.
-- Allow Node.js through Windows Firewall on Private networks only.
+- Allow Node.js through the firewall: on macOS, allow incoming connections for `node` in **System Settings > Network > Firewall > Options**; on Windows, allow it on Private networks only.
+- On macOS, if `npm run deploy` or `npm run debug` cannot reach the Roku, confirm your terminal app has **Local Network** access in **System Settings > Privacy & Security > Local Network**.
+- A sleeping Mac stops serving the Roku. Run `caffeinate -i npm run api` or adjust Energy settings.
 - From another device on the same network, open `http://COMPUTER_IP:8787/health`.
 - Rebuild and reinstall after changing `FLIGHTLANE_API_URL`; it is the only service setting compiled into the Roku ZIP.
 
@@ -66,7 +72,7 @@ This is a Roku platform limitation: only one sideloaded development app can be p
 
 ## View the BrightScript console
 
-```powershell
+```sh
 npm run debug
 ```
 

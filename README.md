@@ -11,20 +11,20 @@ This repository is the self-hosted edition. A small service runs on a computer i
 ## What you need
 
 - A Roku TV or player running Roku OS 15.1 or newer
-- A Windows 10 or 11 computer on the same private network as the Roku
+- A macOS, Windows 10/11, or Linux computer on the same private network as the Roku
 - [Node.js 20 or newer](https://nodejs.org/en/download)
 - A free [Roku developer account](https://developer.roku.com/)
 - Roku developer mode enabled
 - A Google Maps Platform project with Maps Static API and Geocoding API enabled
 - Optional: a FlightAware AeroAPI key for origin, destination, and status enrichment
 
-The local service itself also runs on macOS or Linux with Node.js 20+, but the included one-command Roku packaging and deployment scripts currently target Windows PowerShell.
+All helper scripts are plain Node.js, so the same `npm run` commands work in macOS Terminal, Windows PowerShell, and Linux shells. Deployment also uses `curl`, which is built into macOS and Windows 10/11.
 
 ## Quick start
 
 1. Clone this repository and install the development dependency:
 
-   ```powershell
+   ```sh
    git clone https://github.com/QapHub/Roku-FlightLane-SelfHosted.git
    cd Roku-FlightLane-SelfHosted
    npm install
@@ -45,13 +45,13 @@ The local service itself also runs on macOS or Linux with Node.js 20+, but the i
 
 3. Start the local service and leave this terminal open:
 
-   ```powershell
+   ```sh
    npm run api
    ```
 
 4. Open a second terminal and install Flight Lane on the Roku:
 
-   ```powershell
+   ```sh
    npm run deploy
    ```
 

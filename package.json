@@ -8,14 +8,14 @@
     "node": ">=20"
   },
   "scripts": {
-    "setup": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "setup": "node scripts/setup.mjs",
     "api": "node server/server.mjs",
-    "build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1",
-    "build:screensaver": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -ScreenSaver",
-    "deploy": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
-    "debug": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/debug.ps1",
-    "diagnose": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose.ps1",
-    "check": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/validate.ps1",
+    "build": "node scripts/build.mjs",
+    "build:screensaver": "node scripts/build.mjs --screensaver",
+    "deploy": "node scripts/deploy.mjs",
+    "debug": "node scripts/debug.mjs",
+    "diagnose": "node scripts/diagnose.mjs",
+    "check": "node scripts/validate.mjs",
     "test": "node --test"
   },
   "devDependencies": {

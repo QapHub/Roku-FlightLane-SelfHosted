@@ -18,13 +18,17 @@ Roku's official instructions are at [Activating developer mode](https://develope
 
 Run:
 
-```powershell
+```sh
 npm run setup
 ```
 
 The script lists likely IPv4 addresses. You can also run:
 
-```powershell
+```sh
+# macOS (Wi-Fi is usually en0; Ethernet may be en1 or another enN)
+ipconfig getifaddr en0
+
+# Windows
 ipconfig
 ```
 
@@ -41,16 +45,21 @@ Reserve the computer and Roku addresses in your router's DHCP settings if possib
 
 ## 3. Start the local service
 
-```powershell
+```sh
 npm run api
 ```
 
-On first launch, Windows Firewall may ask whether Node.js can accept connections. Allow it on **Private networks** only. Leave the terminal open whenever Flight Lane is in use.
+On first launch, the firewall may ask whether Node.js can accept incoming connections:
+
+- **macOS:** select **Allow** when asked whether `node` may accept incoming network connections. If you dismissed the prompt, open **System Settings > Network > Firewall > Options** and set `node` to allow incoming connections. macOS may also ask for **Local Network** access for your terminal app; allow it so the deploy and debug helpers can reach the Roku (**System Settings > Privacy & Security > Local Network**).
+- **Windows:** allow Node.js on **Private networks** only.
+
+Leave the terminal open whenever Flight Lane is in use. To keep a Mac from sleeping while the service runs, start it with `caffeinate -i npm run api`.
 
 Verify it locally:
 
-```powershell
-Invoke-RestMethod http://localhost:8787/health
+```sh
+curl http://localhost:8787/health
 ```
 
 The health response reports which optional features have keys configured. It never returns the keys.
@@ -59,7 +68,7 @@ The health response reports which optional features have keys configured. It nev
 
 The automated installer builds the ZIP, asks for the developer password, and uploads it:
 
-```powershell
+```sh
 npm run deploy
 ```
 
@@ -91,7 +100,7 @@ The live list and map show only aircraft inside the selected radar radius. The P
 
 Build the standalone package with:
 
-```powershell
+```sh
 npm run build:screensaver
 ```
 
@@ -103,7 +112,7 @@ Roku permits only one sideloaded development app, so installing the screensaver 
 
 Pull the latest code, install dependencies if the lockfile changed, restart the local service, and deploy again:
 
-```powershell
+```sh
 git pull
 npm install
 npm run deploy
