@@ -77,6 +77,7 @@ export function buildPackage({ environmentFile = ".env.local", screenSaver = fal
 
   const hasLocation = false;
   const showFlyoverCount = !/^(0|false|no|off)$/i.test(String(config.SHOW_FLYOVER_COUNT ?? "true").trim());
+  const colorByAltitude = /^(1|true|yes|on)$/i.test(String(config.COLOR_BY_ALTITUDE ?? "false").trim());
   // Defaults for the Roku settings screen; a choice saved on the Roku takes precedence.
   const trailMinutes = closestOption(readNumber(config.TRAIL_MINUTES ?? "5", 5), [0, 1, 2, 5]);
   const pollSeconds = closestOption(
@@ -148,6 +149,7 @@ function GetAppConfig() as object
         flightLaneApiUrl: "${flightLaneApiUrl}"
         buildId: "${brightScriptString(gitBuildId())}"
         showFlyoverCount: ${showFlyoverCount}
+        colorByAltitude: ${colorByAltitude}
         trailMinutes: ${trailMinutes}
         pollSeconds: ${pollSeconds}
     }

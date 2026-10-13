@@ -121,6 +121,7 @@ sub OnSettingsResult(event as object)
             showFlyoverCount: saved.showFlyoverCount
             trailMinutes: saved.trailMinutes
             pollSeconds: saved.pollSeconds
+            colorByAltitude: saved.colorByAltitude
         }
         BuildContent()
         m.settingsList.SetFocus(true)

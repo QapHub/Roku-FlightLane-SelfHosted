@@ -538,11 +538,15 @@ sub ApplyRuntimeSettings(settings as object)
         radiusMiles: radiusMiles
         idleMinutes: idleMinutes
         showFlyoverCount: showFlyoverCount
+        colorByAltitude: SettingBoolean(settings.colorByAltitude, IsTrue(m.config.colorByAltitude))
         trailMinutes: NumberOr(settings.trailMinutes, NumberOr(m.config.trailMinutes, 5))
         pollSeconds: NumberOr(settings.pollSeconds, NumberOr(m.config.pollSeconds, 5))
     }
     m.flyoverCountCaption.visible = showFlyoverCount
     m.flyoverCountLabel.visible = showFlyoverCount
+    if m.altitudeLegend <> invalid
+        m.altitudeLegend.visible = m.settings.colorByAltitude
+    end if
     m.pendingSettings = invalid
     m.firstLaunchSetup = false
     m.settingsOpen = false
@@ -644,6 +648,7 @@ function CloneSettings(settings as object) as object
         showFlyoverCount: settings.showFlyoverCount
         trailMinutes: settings.trailMinutes
         pollSeconds: settings.pollSeconds
+        colorByAltitude: settings.colorByAltitude
     }
 end function
 
@@ -653,6 +658,13 @@ function TrailLabel(minutes as dynamic) as string
         return "Off"
     end if
     return FormatSettingNumber(value) + " min"
+end function
+
+function SettingBoolean(value as dynamic, fallback as boolean) as boolean
+    if Type(value) = "roBoolean" or Type(value) = "Boolean"
+        return value
+    end if
+    return fallback
 end function
 
 function OnOffLabel(value as dynamic) as string
@@ -706,6 +718,7 @@ sub BuildSettingsContent()
         "24-hour flyover count: " + OnOffLabel(m.pendingSettings.showFlyoverCount)
         "Aircraft trails: " + TrailLabel(m.pendingSettings.trailMinutes)
         "Provider polling: every " + FormatSettingNumber(m.pendingSettings.pollSeconds) + " s"
+        "Color by altitude: " + OnOffLabel(m.pendingSettings.colorByAltitude)
         "Save and close"
     ]
     content = CreateObject("roSGNode", "ContentNode")
@@ -730,9 +743,9 @@ sub ActivateSettingsRow(index as integer)
         AdjustSettingsValue(1)
     else if index = 2
         AdjustSettingsValue(1)
-    else if index >= 3 and index <= 5
+    else if index >= 3 and index <= 6
         AdjustSettingsValue(1)
-    else if index = 6
+    else if index = 7
         m.statusLabel.text = "SAVING SETTINGS..."
         SaveRuntimeSettings(m.pendingSettings)
     end if
@@ -764,6 +777,8 @@ sub AdjustSettingsValue(direction as integer)
         m.pendingSettings.trailMinutes = StepOption(TrailMinuteOptions(), m.pendingSettings.trailMinutes, direction)
     else if index = 5
         m.pendingSettings.pollSeconds = StepOption(PollSecondOptions(), m.pendingSettings.pollSeconds, direction)
+    else if index = 6
+        m.pendingSettings.colorByAltitude = m.pendingSettings.colorByAltitude <> true
     else
         return
     end if
@@ -1280,6 +1295,8 @@ sub BuildAltitudeLegend()
     end if
     legend = panel.CreateChild("Group")
     legend.translation = [70, 906]
+    legend.visible = false
+    m.altitudeLegend = legend
     x = 0
     for each band in AltitudeBands()
         chip = legend.CreateChild("Rectangle")
@@ -2035,7 +2052,7 @@ sub DrawCloseupPip()
     path.translation = [center, center - 2]
     path.scaleRotateCenter = [0, 2]
     path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
-    path.color = SelectedAircraftColor() + "CC"
+    path.color = HighlightColor() + "CC"
 
     marker = CreateObject("roSGNode", "Group")
     marker.translation = [center, center]
@@ -2090,16 +2107,14 @@ sub DrawAircraftTrail(parent as object, aircraft as object, selected as boolean,
     end if
     points.Push({ eastMiles: aircraft.eastMiles, northMiles: aircraft.northMiles, altitudeFt: aircraft.altitudeFt, onGround: aircraft.onGround })
 
-    ' Each segment takes the altitude color of its newer end; the selected aircraft is yellow.
+    ' With altitude coloring, each segment takes the color of its newer end.
     segmentCount = points.Count() - 1
     for index = 0 to segmentCount - 1
-        alpha = Int(60 + (170 * (index + 1) / segmentCount))
-        if selected
-            color = SelectedAircraftColor() + ByteHex(alpha)
-        else
-            newer = points[index + 1]
-            color = AltitudeColor(NumberOr(newer.altitudeFt, 0), IsTrue(newer.onGround)) + ByteHex(Int(alpha * 0.75))
+        alpha = Int(40 + (150 * (index + 1) / segmentCount))
+        if ColorByAltitude()
+            alpha = Int(60 + (170 * (index + 1) / segmentCount))
         end if
+        color = TrailColor(aircraft, points[index + 1], selected, alpha)
         AddLineSegment(parent, center + (points[index].eastMiles * scale), center - (points[index].northMiles * scale), center + (points[index + 1].eastMiles * scale), center - (points[index + 1].northMiles * scale), color, 2)
     end for
 end sub
@@ -2113,11 +2128,10 @@ function DrawProjectedPath(marker as object, aircraft as object, position as obj
         return path
     end if
     horizon = 60
-    color = AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "77"
+    color = PathColor(aircraft, selected)
     thickness = 3
     if selected
         horizon = 90
-        color = SelectedAircraftColor() + "AA"
     end if
     heading = NumberOr(position.heading, aircraft.heading)
     previousX = 0.0
@@ -2137,7 +2151,7 @@ function DrawProjectedPath(marker as object, aircraft as object, position as obj
 end function
 
 ' Adds a heading-rotated icon for the aircraft's class (airliner, light, military, rotorcraft,
-' ground), tinted by altitude band, or yellow when selected.
+' ground), tinted by IconColor.
 function AddAircraftIcon(parent as object, aircraft as object, heading as float, size as integer, selected as boolean) as object
     icon = parent.CreateChild("Poster")
     icon.uri = "pkg:/images/aircraft-" + StringOr(aircraft.kind, "light") + ".png"
@@ -2146,12 +2160,54 @@ function AddAircraftIcon(parent as object, aircraft as object, heading as float,
     icon.translation = [-size / 2, -size / 2]
     icon.scaleRotateCenter = [size / 2, size / 2]
     icon.rotation = HeadingRotation(heading)
-    if selected
-        icon.blendColor = SelectedAircraftColor() + "FF"
-    else
-        icon.blendColor = AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "FF"
-    end if
+    icon.blendColor = IconColor(aircraft, selected)
     return icon
+end function
+
+' Aircraft colors. By default: blue, red for military, amber when selected. With "Color by
+' altitude" on: altitude bands, with yellow reserved for the selected aircraft.
+function ColorByAltitude() as boolean
+    return m.settings <> invalid and IsTrue(m.settings.colorByAltitude)
+end function
+
+function HighlightColor() as string
+    if ColorByAltitude()
+        return SelectedAircraftColor()
+    end if
+    return "0xFBBF24"
+end function
+
+function IconColor(aircraft as object, selected as boolean) as string
+    if selected
+        return HighlightColor() + "FF"
+    end if
+    if ColorByAltitude()
+        return AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "FF"
+    end if
+    if IsTrue(aircraft.military)
+        return "0xF87171FF"
+    end if
+    return "0x38BDF8FF"
+end function
+
+function TrailColor(aircraft as object, point as object, selected as boolean, alpha as integer) as string
+    if selected
+        return HighlightColor() + ByteHex(alpha)
+    end if
+    if ColorByAltitude()
+        return AltitudeColor(NumberOr(point.altitudeFt, 0), IsTrue(point.onGround)) + ByteHex(Int(alpha * 0.75))
+    end if
+    return "0x7DD3FC" + ByteHex(Int(alpha * 0.6))
+end function
+
+function PathColor(aircraft as object, selected as boolean) as string
+    if selected
+        return HighlightColor() + "AA"
+    end if
+    if ColorByAltitude()
+        return AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "77"
+    end if
+    return "0x38BDF855"
 end function
 
 ' Icons point north; SceneGraph rotates counterclockwise, compass headings run clockwise.

@@ -36,7 +36,7 @@ Each aircraft is drawn as a small icon pointing along its heading:
 | Ground vehicle | Categories C1 to C3 (airport vehicles and obstacles) |
 | Light aircraft | Categories A1 and A2, and anything unclassified |
 
-Icons, trails, and projected paths are colored by altitude, with a key under the radar. Trails change color along their length as the aircraft climbs or descends. Yellow is reserved for the selected aircraft.
+By default, icons are blue (red for military aircraft) and the selected aircraft is amber. With `COLOR_BY_ALTITUDE=true` in `.env.local`, or **Color by altitude** turned on in the app's settings, icons, trails, and projected paths are colored by altitude instead, with a key under the radar. Trails change color along their length as the aircraft climbs or descends. Yellow is reserved for the selected aircraft.
 
 | Altitude | Color |
 | --- | --- |
