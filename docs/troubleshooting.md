@@ -53,7 +53,7 @@ npm run diagnose
 - If ADSB.lol is unavailable, the local service should try ADSB.fi automatically. Watch the `npm run api` terminal for `provider_fallback` and `provider_cooldown` messages. A 429 means the provider is rate-limiting your internet connection; a 403 from Airplanes.live means it requires approved access.
 - If `.env.local` sets `AIRCRAFT_API_BASE_URL=https://api.airplanes.live/v2` and you have not been granted access, change it to `https://api.adsb.lol/v2`.
 - Keep the app open through another refresh cycle.
-- Set `AIRCRAFT_CACHE_SECONDS` within your provider allowance. Longer values reduce upstream usage but delay authoritative corrections.
+- Set `AIRCRAFT_CACHE_SECONDS` within your provider allowance (ADSB.fi: 1 request per second; ADSB.lol throttles faster than about one every 2 seconds). Longer values reduce upstream usage but make trails coarser and corrections slower.
 - Use `npm run debug` and look for the sanitized nearby-provider HTTP status and raw/usable counts.
 
 Small aircraft may not broadcast usable ADS-B positions, may be outside receiver coverage, or may omit coordinates. Flight Lane cannot display an aircraft that the configured provider does not return with a usable position.

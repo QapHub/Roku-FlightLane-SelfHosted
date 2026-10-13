@@ -106,3 +106,71 @@ function LocalClock(epochSeconds as dynamic) as string
     clock.ToLocalTime()
     return PadTwo(clock.GetHours()) + ":" + PadTwo(clock.GetMinutes())
 end function
+
+' BrightScript has only Atn(), so this provides the two-argument arctangent in radians.
+function Atan2(y as float, x as float) as float
+    pi = 3.14159265358979
+    if x > 0
+        return Atn(y / x)
+    else if x < 0 and y >= 0
+        return Atn(y / x) + pi
+    else if x < 0
+        return Atn(y / x) - pi
+    else if y > 0
+        return pi / 2
+    else if y < 0
+        return -pi / 2
+    end if
+    return 0
+end function
+
+' Wraps an angle in degrees into -180..180.
+function WrapDegrees(value as float) as float
+    wrapped = value
+    while wrapped > 180
+        wrapped = wrapped - 360
+    end while
+    while wrapped < -180
+        wrapped = wrapped + 360
+    end while
+    return wrapped
+end function
+
+' Moves an aircraft forward along a constant-rate turn (degrees per second, positive = right),
+' then straight. When the autopilot-selected heading (navHeading, or -1) lies ahead in the
+' turn, the turn stops there. Turns are capped at 180 degrees.
+function AdvancePosition(eastMiles as float, northMiles as float, heading as float, speedKnots as float, turnRate as float, navHeading as float, seconds as float) as object
+    speedMilesPerSecond = speedKnots * 1.150779 / 3600
+    radiansPerDegree = 3.14159265358979 / 180
+    east = eastMiles
+    north = northMiles
+    currentHeading = heading
+    remaining = seconds
+
+    if Abs(turnRate) >= 0.05 and remaining > 0
+        turnSeconds = remaining
+        if Abs(180 / turnRate) < turnSeconds
+            turnSeconds = Abs(180 / turnRate)
+        end if
+        if navHeading >= 0
+            toTarget = WrapDegrees(navHeading - heading)
+            if toTarget * turnRate > 0 and toTarget / turnRate < turnSeconds
+                turnSeconds = toTarget / turnRate
+            end if
+        end if
+        rate = turnRate * radiansPerDegree
+        startRadians = heading * radiansPerDegree
+        endRadians = startRadians + (rate * turnSeconds)
+        east = east + ((speedMilesPerSecond / rate) * (Cos(startRadians) - Cos(endRadians)))
+        north = north + ((speedMilesPerSecond / rate) * (Sin(endRadians) - Sin(startRadians)))
+        currentHeading = heading + (turnRate * turnSeconds)
+        remaining = remaining - turnSeconds
+    end if
+
+    if remaining > 0
+        headingRadians = currentHeading * radiansPerDegree
+        east = east + (speedMilesPerSecond * remaining * Sin(headingRadians))
+        north = north + (speedMilesPerSecond * remaining * Cos(headingRadians))
+    end if
+    return { eastMiles: east, northMiles: north, heading: currentHeading }
+end function

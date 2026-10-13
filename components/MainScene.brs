@@ -1880,26 +1880,17 @@ sub DrawRadar()
     end if
 
     if maxMarkers > 0
+        trails = CreateObject("roSGNode", "Group")
+        m.markerLayer.AppendChild(trails)
         for index = 0 to maxMarkers - 1
             aircraft = m.aircraft[index]
             position = InterpolatedAircraftPosition(aircraft)
             selected = index = m.selectedIndex
+            DrawAircraftTrail(trails, aircraft, selected, center, scale)
+
             marker = CreateObject("roSGNode", "Group")
             marker.translation = [center + (position.eastMiles * scale), center - (position.northMiles * scale)]
-
-            projectionDistance = DistanceToRadarEdge(position.eastMiles, position.northMiles, aircraft.heading, m.config.radiusMiles)
-            path = marker.CreateChild("Rectangle")
-            path.width = projectionDistance * scale
-            path.height = 3
-            path.translation = [0, -1]
-            path.scaleRotateCenter = [0, 1]
-            path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
-            path.visible = projectionDistance > 0
-            if selected
-                path.color = "0xFBBF2488"
-            else
-                path.color = "0x38BDF855"
-            end if
+            path = DrawProjectedPath(marker, aircraft, position, selected, scale)
 
             dot = marker.CreateChild("Rectangle")
             if selected
@@ -2002,6 +1993,95 @@ sub DrawCloseupPip()
     PositionCloseupPip()
 end sub
 
+'
+' Draws where the aircraft actually flew: its earlier reported positions joined to the latest
+' report, fading with age. The selected aircraft shows its full trail; others the last ~80s.
+sub DrawAircraftTrail(parent as object, aircraft as object, selected as boolean, center as float, scale as float)
+    if Type(aircraft.trail) <> "roArray" or aircraft.trail.Count() = 0
+        return
+    end if
+    points = []
+    first = 0
+    if not selected and aircraft.trail.Count() > 8
+        first = aircraft.trail.Count() - 8
+    end if
+    for index = first to aircraft.trail.Count() - 1
+        points.Push(aircraft.trail[index])
+    end for
+    points.Push({ eastMiles: aircraft.eastMiles, northMiles: aircraft.northMiles })
+
+    segmentCount = points.Count() - 1
+    for index = 0 to segmentCount - 1
+        alpha = Int(40 + (150 * (index + 1) / segmentCount))
+        if selected
+            color = "0xFBBF24" + ByteHex(alpha)
+        else
+            color = "0x7DD3FC" + ByteHex(Int(alpha * 0.6))
+        end if
+        AddLineSegment(parent, center + (points[index].eastMiles * scale), center - (points[index].northMiles * scale), center + (points[index + 1].eastMiles * scale), center - (points[index + 1].northMiles * scale), color, 2)
+    end for
+end sub
+
+' Draws the projected path as a curve following the current turn: 90 seconds for the
+' selected aircraft, 60 for others, stopping at the radar edge. Coordinates are relative to
+' the marker so the path moves with it.
+function DrawProjectedPath(marker as object, aircraft as object, position as object, selected as boolean, scale as float) as object
+    path = marker.CreateChild("Group")
+    if aircraft.speedKnots <= 1
+        return path
+    end if
+    horizon = 60
+    color = "0x38BDF855"
+    thickness = 3
+    if selected
+        horizon = 90
+        color = "0xFBBF2488"
+    end if
+    heading = NumberOr(position.heading, aircraft.heading)
+    previousX = 0.0
+    previousY = 0.0
+    for seconds = 10 to horizon step 10
+        ahead = AdvancePosition(position.eastMiles, position.northMiles, heading, aircraft.speedKnots, NumberOr(aircraft.turnRate, 0), NumberOr(aircraft.navHeading, -1), seconds)
+        if Sqr((ahead.eastMiles * ahead.eastMiles) + (ahead.northMiles * ahead.northMiles)) > m.config.radiusMiles
+            exit for
+        end if
+        x = (ahead.eastMiles - position.eastMiles) * scale
+        y = (position.northMiles - ahead.northMiles) * scale
+        AddLineSegment(path, previousX, previousY, x, y, color, thickness)
+        previousX = x
+        previousY = y
+    end for
+    return path
+end function
+
+' SceneGraph has no line primitive, so a segment is a thin rectangle rotated about its start.
+sub AddLineSegment(parent as object, x1 as float, y1 as float, x2 as float, y2 as float, color as string, thickness as integer)
+    dx = x2 - x1
+    dy = y2 - y1
+    length = Sqr((dx * dx) + (dy * dy))
+    if length < 0.5
+        return
+    end if
+    segment = parent.CreateChild("Rectangle")
+    segment.width = length
+    segment.height = thickness
+    segment.translation = [x1, y1 - (thickness / 2)]
+    segment.scaleRotateCenter = [0, thickness / 2]
+    segment.rotation = Atan2(-dy, dx)
+    segment.color = color
+end sub
+
+function ByteHex(value as integer) as string
+    digits = "0123456789ABCDEF"
+    clamped = value
+    if clamped < 0
+        clamped = 0
+    else if clamped > 255
+        clamped = 255
+    end if
+    return Mid(digits, Int(clamped / 16) + 1, 1) + Mid(digits, (clamped mod 16) + 1, 1)
+end function
+
 sub AnimateRadarMarkers()
     if m.radarMarkers = invalid or m.radarMarkers.Count() = 0
         return
@@ -2018,9 +2098,6 @@ sub AnimateRadarMarkers()
             markerRecord.group.visible = distanceMiles <= m.config.radiusMiles
             if markerRecord.group.visible
                 markerRecord.group.translation = [center + (position.eastMiles * scale), center - (position.northMiles * scale)]
-                projectionDistance = DistanceToRadarEdge(position.eastMiles, position.northMiles, aircraft.heading, m.config.radiusMiles)
-                markerRecord.path.width = projectionDistance * scale
-                markerRecord.path.visible = projectionDistance > 0
             end if
         end if
     end for
@@ -2064,7 +2141,7 @@ sub PositionCloseupPip()
 
     center = m.config.closeupViewportSize / 2
     m.closeupMarkerRecord.group.translation = [center, center]
-    m.closeupMarkerRecord.path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
+    m.closeupMarkerRecord.path.rotation = (90 - NumberOr(position.heading, aircraft.heading)) * 3.14159265358979 / 180
 
     radiusMiles = m.config.closeupRadiusFeet / 5280.0
     homeEastMiles = 0 - position.eastMiles
@@ -2089,11 +2166,11 @@ function ProjectedAircraftPosition(aircraft as object, animationSeconds as float
         elapsedSeconds = maximumSeconds
     end if
 
-    headingRadians = aircraft.heading * 3.14159265358979 / 180
-    traveledMiles = aircraft.speedKnots * 1.150779 * elapsedSeconds / 3600
+    advanced = AdvancePosition(aircraft.eastMiles, aircraft.northMiles, aircraft.heading, aircraft.speedKnots, NumberOr(aircraft.turnRate, 0), NumberOr(aircraft.navHeading, -1), elapsedSeconds)
     return {
-        eastMiles: aircraft.eastMiles + (traveledMiles * Sin(headingRadians))
-        northMiles: aircraft.northMiles + (traveledMiles * Cos(headingRadians))
+        eastMiles: advanced.eastMiles
+        northMiles: advanced.northMiles
+        heading: advanced.heading
         elapsedSeconds: elapsedSeconds
     }
 end function
@@ -2113,19 +2190,3 @@ function InterpolatedAircraftPosition(aircraft as object) as object
     return position
 end function
 
-function DistanceToRadarEdge(eastMiles as float, northMiles as float, heading as float, radiusMiles as float) as float
-    headingRadians = heading * 3.14159265358979 / 180
-    eastUnit = Sin(headingRadians)
-    northUnit = Cos(headingRadians)
-    b = 2 * ((eastMiles * eastUnit) + (northMiles * northUnit))
-    c = (eastMiles * eastMiles) + (northMiles * northMiles) - (radiusMiles * radiusMiles)
-    discriminant = (b * b) - (4 * c)
-    if discriminant < 0
-        return 0
-    end if
-    distance = (-b + Sqr(discriminant)) / 2
-    if distance < 0
-        return 0
-    end if
-    return distance
-end function

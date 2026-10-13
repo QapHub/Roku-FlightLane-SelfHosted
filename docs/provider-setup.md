@@ -10,19 +10,28 @@ Relevant `.env.local` settings:
 
 ```dotenv
 AIRCRAFT_API_BASE_URL=https://api.adsb.lol/v2
-AIRCRAFT_CACHE_SECONDS=15
+AIRCRAFT_CACHE_SECONDS=2
 ```
 
-`AIRCRAFT_CACHE_SECONDS` is the minimum time between upstream requests for the same rounded location and radius. Multiple local Roku refreshes during that window reuse the in-memory response. At continuous use, the approximate maximum is `86,400 / AIRCRAFT_CACHE_SECONDS` upstream calls per day: 5,760 at the default 15 seconds, 2,880 at 30 seconds.
+`AIRCRAFT_CACHE_SECONDS` (default 2) is the time between upstream requests for your location and radius. While a Roku has requested aircraft in the last two minutes, the local service polls at this rate in the background, independent of the Roku's `REFRESH_SECONDS`, so it can record each aircraft's track densely. Polling stops two minutes after the Roku stops asking (for example, when the TV is off). Roku refreshes in between reuse the latest in-memory response. At continuous use that is up to `86,400 / AIRCRAFT_CACHE_SECONDS` upstream calls per day: 43,200 at 2 seconds, 5,760 at 15 seconds.
 
 Backup provider requests use the same rounded location, radius, timeout, and cache window. They are only tried after an earlier provider fails, so normal use still starts with your configured `AIRCRAFT_API_BASE_URL`.
 
 Provider limits differ:
 
-- ADSB.lol and ADSB.fi do not publish a fixed daily allowance but rate-limit bursts; in testing, a few requests in quick succession returned 429, while one request every couple of seconds did not. The default 15-second cache stays well under that. Running other ADS-B tools from the same internet connection shares the same allowance.
+- ADSB.fi documents a limit of 1 request per second on its public endpoints.
+- ADSB.lol publishes no limit but rate-limits bursts: in testing, one request every 2 seconds was accepted while one per second was refused (429) after a few requests. A 429 skips ADSB.lol for 30 seconds and uses ADSB.fi.
+- Both are free community services, and other ADS-B tools on the same internet connection share the allowance. If you see frequent `provider_cooldown` messages, raise `AIRCRAFT_CACHE_SECONDS` (5 or 10 still gives useful trails).
 - Airplanes.live now refuses API requests (HTTP 403) unless you contact them for access, so it is no longer a default fallback. If you are granted access, set `AIRCRAFT_API_BASE_URL=https://api.airplanes.live/v2` and follow their published limits.
 
-The interface animates projected motion between responses, but a longer cache means less authoritative position correction.
+### Tracks on the radar
+
+The local service keeps each aircraft's reported positions for five minutes, in memory only. Each refresh sends the Roku a thinned trail (about one point every 10 seconds, plus points where the aircraft turned) and a turn rate worked out from its recent tracks. The Roku draws:
+
+- **where the aircraft flew:** a fading line through its earlier positions, the full five minutes for the selected aircraft and about the last 80 seconds for others;
+- **where it is heading:** a path curving with the current turn, 90 seconds ahead for the selected aircraft and 60 for others. When the aircraft reports an autopilot-selected heading, the curve straightens out on that heading.
+
+Markers move along the same curve between updates, and the closest-approach estimate uses it too. Trails start when an aircraft enters your radius and reset when the local service restarts.
 
 ## Address lookup
 

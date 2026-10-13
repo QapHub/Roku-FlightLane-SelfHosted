@@ -99,7 +99,7 @@ Never forward port `8787` from your router or expose it directly to the internet
 
 ## Provider usage
 
-The Roku can refresh its local display more often than the service calls a provider. `REFRESH_SECONDS` controls Roku-to-computer refreshes; `AIRCRAFT_CACHE_SECONDS` controls upstream live-aircraft refreshes.
+The Roku can refresh its local display more often than the service calls a provider. `REFRESH_SECONDS` controls Roku-to-computer refreshes; `AIRCRAFT_CACHE_SECONDS` (default 2) sets how often the local service polls the live-aircraft provider while a Roku is active, which also sets how detailed the aircraft trails on the radar are.
 
 Flight Lane tries the configured live-aircraft provider (ADSB.lol by default) first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.fi. A provider that refuses requests is skipped for a while (30 seconds after rate limiting, 30 minutes after a 403) instead of being retried on every refresh. A 15-second cache makes at most 5,760 upstream calls during 24 hours of continuous use. See [Provider setup](docs/provider-setup.md) for each provider's limits before leaving the app running continuously.
 

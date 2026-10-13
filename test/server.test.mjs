@@ -7,6 +7,7 @@ import {
   fetchAircraftPositionsFromProviders,
   isPrivateNetworkAddress,
   normalizeProviderPayload,
+  AircraftTrackHistory,
   parseEnv,
   selectCurrentFlight,
 } from "../server/server.mjs";
@@ -503,4 +504,56 @@ test("without a spend warning, spending is hidden but the spend limit still appl
   const limited = await overLimit.lookup("AAL100");
   assert.equal(overLimit.billedCalls(), 0);
   assert.equal(limited.source, undefined);
+});
+
+test("track history keeps a thinned trail and derives the turn rate", () => {
+  const history = new AircraftTrackHistory();
+  const start = Date.parse("2026-10-13T14:00:00Z");
+  // A right turn at 3 degrees per second, reported every 2 seconds for 60 seconds.
+  for (let seconds = 0; seconds <= 60; seconds += 2) {
+    history.record(
+      { ac: [{ hex: "A1B2C3", lat: 33 + seconds * 0.001, lon: -84, track: 90 + seconds * 3, seen_pos: 0 }] },
+      start + seconds * 1000,
+    );
+  }
+
+  const trail = history.trail("a1b2c3");
+  assert.ok(trail.length >= 6 && trail.length <= 30, `trail length ${trail.length}`);
+  assert.deepEqual(trail[trail.length - 1].length, 2);
+  assert.ok(trail[0][0] < trail[trail.length - 1][0], "oldest point first");
+  assert.equal(history.turnRate("A1B2C3"), 3);
+
+  const annotated = history.annotate({ ac: [{ hex: "A1B2C3", lat: 33.06, lon: -84 }], now: 1 });
+  assert.deepEqual(annotated.ac[0].fl_trail, trail);
+  assert.equal(annotated.ac[0].fl_turn_rate, 3);
+
+  history.prune(start + 10 * 60 * 1000);
+  assert.deepEqual(history.trail("a1b2c3"), [], "history older than five minutes is dropped");
+});
+
+test("the service polls an active area in the background between Roku refreshes", async (context) => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return Response.json({
+      // Turning 10 degrees per poll, so each earlier point is kept as a turn point.
+      ac: [{ hex: "abc123", lat: 28.5 + calls * 0.001, lon: -81.6, track: calls * 10, seen_pos: 0 }],
+      now: Date.now(),
+    });
+  };
+  const server = createFlightLaneServer({
+    config: testConfig({ AIRCRAFT_CACHE_SECONDS: "1" }),
+    fetchImpl,
+  });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+  const query = "/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=4";
+
+  await (await fetch(baseUrl + query)).json();
+  assert.equal(calls, 1);
+  await new Promise((resolve) => setTimeout(resolve, 2300));
+  assert.ok(calls >= 2, `background polls made: ${calls - 1}`);
+
+  const payload = await (await fetch(baseUrl + query)).json();
+  assert.ok(payload.ac[0].fl_trail.length >= 1, "trail built from background polls");
 });

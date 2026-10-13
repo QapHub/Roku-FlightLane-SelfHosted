@@ -238,7 +238,26 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
     operatorName = StringOr(rawAircraft.ownOp, "")
     airline = AirlineIdentity(callsign, operatorName)
     phase = EstimatePhase(onGround, altitudeFt, verticalRate)
-    closest = ClosestApproach(eastMiles, northMiles, heading, speedKnots)
+    turnRate = NumberOr(rawAircraft.fl_turn_rate, 0)
+    navHeading = NumberOr(rawAircraft.nav_heading, -1)
+    if onGround
+        turnRate = 0
+        navHeading = -1
+    end if
+    closest = ClosestApproach(eastMiles, northMiles, heading, speedKnots, turnRate, navHeading)
+
+    ' Earlier reported positions from the local service, converted like the current one.
+    trail = []
+    if Type(rawAircraft.fl_trail) = "roArray"
+        for each point in rawAircraft.fl_trail
+            if Type(point) = "roArray" and point.Count() >= 2 and IsNumericValue(point[0]) and IsNumericValue(point[1])
+                trail.Push({
+                    northMiles: (point[0] - config.homeLatitude) * 69.0
+                    eastMiles: (point[1] - config.homeLongitude) * 69.172 * Cos(latitudeRadians)
+                })
+            end if
+        end for
+    end if
     sourceAgeSeconds = NumberOr(rawAircraft.seen_pos, NumberOr(rawAircraft.seen, 0)) + payloadAgeSeconds
     if sourceAgeSeconds < 0
         sourceAgeSeconds = 0
@@ -266,6 +285,9 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
         onGround: onGround
         speedKnots: speedKnots
         heading: heading
+        turnRate: turnRate
+        navHeading: navHeading
+        trail: trail
         verticalRateFpm: verticalRate
         phase: phase
         closestMiles: closest.distanceMiles
@@ -362,28 +384,28 @@ function EstimatePhase(onGround as boolean, altitudeFt as float, verticalRate as
     return "Level flight"
 end function
 
-function ClosestApproach(eastMiles as float, northMiles as float, heading as float, speedKnots as float) as object
+' Closest approach to home along the projected path (curving with the current turn), sampled
+' every 10 seconds for up to 10 minutes.
+function ClosestApproach(eastMiles as float, northMiles as float, heading as float, speedKnots as float, turnRate as float, navHeading as float) as object
+    startDistance = Sqr((eastMiles * eastMiles) + (northMiles * northMiles))
     if speedKnots <= 1
-        return { approaching: false, distanceMiles: Sqr((eastMiles * eastMiles) + (northMiles * northMiles)), etaMinutes: -1 }
+        return { approaching: false, distanceMiles: startDistance, etaMinutes: -1 }
     end if
 
-    headingRadians = heading * 3.14159265358979 / 180
-    speedMph = speedKnots * 1.150779
-    eastVelocity = speedMph * Sin(headingRadians)
-    northVelocity = speedMph * Cos(headingRadians)
-    speedSquared = (eastVelocity * eastVelocity) + (northVelocity * northVelocity)
-    timeHours = -1 * (((eastMiles * eastVelocity) + (northMiles * northVelocity)) / speedSquared)
-    if timeHours <= 0
-        return { approaching: false, distanceMiles: Sqr((eastMiles * eastMiles) + (northMiles * northMiles)), etaMinutes: -1 }
+    bestDistance = startDistance
+    bestSeconds = 0
+    for seconds = 10 to 600 step 10
+        position = AdvancePosition(eastMiles, northMiles, heading, speedKnots, turnRate, navHeading, seconds)
+        distance = Sqr((position.eastMiles * position.eastMiles) + (position.northMiles * position.northMiles))
+        if distance < bestDistance
+            bestDistance = distance
+            bestSeconds = seconds
+        end if
+    end for
+    if bestSeconds = 0
+        return { approaching: false, distanceMiles: startDistance, etaMinutes: -1 }
     end if
-
-    closestEast = eastMiles + (eastVelocity * timeHours)
-    closestNorth = northMiles + (northVelocity * timeHours)
-    return {
-        approaching: true
-        distanceMiles: Sqr((closestEast * closestEast) + (closestNorth * closestNorth))
-        etaMinutes: timeHours * 60
-    }
+    return { approaching: true, distanceMiles: bestDistance, etaMinutes: bestSeconds / 60 }
 end function
 
 sub SortAircraftByDistance(aircraft as object)

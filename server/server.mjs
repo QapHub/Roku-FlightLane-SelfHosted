@@ -205,10 +205,12 @@ function buildConfig(environment) {
     timeoutMs: numberSetting(environment, "PROVIDER_TIMEOUT_MS", 10000, 1000, 60000),
     aircraftBaseUrl,
     aircraftProviders: createAircraftProviders(aircraftBaseUrl),
+    // Minimum seconds between provider requests, and the background polling interval.
+    // ADSB.fi documents 1 request/second; ADSB.lol publishes no limit but throttles bursts.
     aircraftCacheSeconds: numberSetting(
       environment,
       "AIRCRAFT_CACHE_SECONDS",
-      15,
+      2,
       1,
       3600,
     ),
@@ -569,6 +571,110 @@ function providerDisplayName(provider) {
 }
 
 const HOUR_MS = 60 * 60 * 1000;
+const TRACK_HISTORY_MS = 5 * 60 * 1000;
+const TRACK_HISTORY_MAX_AIRCRAFT = 2000;
+const TRAIL_SPACING_MS = 10 * 1000;
+const TRAIL_TURN_DEGREES = 8;
+const TRAIL_MAX_POINTS = 30;
+// Poll in the background only while a Roku has asked for this area recently.
+const ACTIVE_AREA_MS = 2 * 60 * 1000;
+
+function wrapDegrees(value) {
+  return ((((value + 180) % 360) + 360) % 360) - 180;
+}
+
+// Records each aircraft's reported positions so the Roku can draw where it actually flew.
+export class AircraftTrackHistory {
+  constructor() {
+    this.tracks = new Map();
+  }
+
+  record(payload, now = Date.now()) {
+    const aircraftList = Array.isArray(payload?.ac) ? payload.ac : payload?.aircraft;
+    for (const aircraft of Array.isArray(aircraftList) ? aircraftList : []) {
+      const id = typeof aircraft?.hex === "string" ? aircraft.hex.toLowerCase() : "";
+      const latitude = Number(aircraft?.lat);
+      const longitude = Number(aircraft?.lon);
+      if (!id || !Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+      const seen = Number(aircraft.seen_pos ?? aircraft.seen ?? 0);
+      const time = now - (Number.isFinite(seen) ? seen * 1000 : 0);
+      const track = Number(aircraft.track);
+      const points = this.tracks.get(id) || [];
+      const last = points[points.length - 1];
+      if (last && time <= last.time + 500) continue;
+      points.push({ time, latitude, longitude, track: Number.isFinite(track) ? track : undefined });
+      this.tracks.delete(id);
+      this.tracks.set(id, points);
+    }
+    this.prune(now);
+  }
+
+  prune(now = Date.now()) {
+    for (const [id, points] of this.tracks) {
+      while (points.length > 0 && points[0].time < now - TRACK_HISTORY_MS) points.shift();
+      if (points.length === 0) this.tracks.delete(id);
+    }
+    while (this.tracks.size > TRACK_HISTORY_MAX_AIRCRAFT) {
+      this.tracks.delete(this.tracks.keys().next().value);
+    }
+  }
+
+  // Earlier positions, oldest first: about one every 10 seconds, plus any point where the
+  // track turned, so curves keep their shape. The newest position is the aircraft itself.
+  trail(id) {
+    const points = this.tracks.get(String(id || "").toLowerCase()) || [];
+    const selected = [];
+    let anchor = points[points.length - 1];
+    for (let index = points.length - 2; index >= 0 && selected.length < TRAIL_MAX_POINTS; index -= 1) {
+      const point = points[index];
+      const turned =
+        point.track !== undefined &&
+        anchor.track !== undefined &&
+        Math.abs(wrapDegrees(anchor.track - point.track)) >= TRAIL_TURN_DEGREES;
+      if (anchor.time - point.time >= TRAIL_SPACING_MS || turned) {
+        selected.push([rounded(point.latitude, 5), rounded(point.longitude, 5)]);
+        anchor = point;
+      }
+    }
+    return selected.reverse();
+  }
+
+  // Degrees per second (positive = right turn) from the track over the last 6-30 seconds.
+  turnRate(id) {
+    const points = (this.tracks.get(String(id || "").toLowerCase()) || []).filter(
+      (point) => point.track !== undefined,
+    );
+    const latest = points[points.length - 1];
+    if (!latest) return undefined;
+    for (let index = points.length - 2; index >= 0; index -= 1) {
+      const elapsed = (latest.time - points[index].time) / 1000;
+      if (elapsed < 6) continue;
+      if (elapsed > 30) break;
+      const rate = wrapDegrees(latest.track - points[index].track) / elapsed;
+      const clamped = Math.max(-5, Math.min(5, rate));
+      return Math.abs(clamped) < 0.2 ? 0 : rounded(clamped, 2);
+    }
+    return undefined;
+  }
+
+  // Adds fl_trail and fl_turn_rate to each aircraft without changing the cached payload.
+  annotate(payload) {
+    const key = Array.isArray(payload?.ac) ? "ac" : Array.isArray(payload?.aircraft) ? "aircraft" : "";
+    if (!key) return payload;
+    return {
+      ...payload,
+      [key]: payload[key].map((aircraft) => {
+        if (typeof aircraft?.hex !== "string") return aircraft;
+        const turnRate = this.turnRate(aircraft.hex);
+        return {
+          ...aircraft,
+          fl_trail: this.trail(aircraft.hex),
+          ...(turnRate === undefined ? {} : { fl_turn_rate: turnRate }),
+        };
+      }),
+    };
+  }
+}
 
 function flightTime(value) {
   const time = Date.parse(String(value || ""));
@@ -680,6 +786,62 @@ export function createFlightLaneServer({
   if (!config) throw new Error("A server configuration is required.");
   const nearbyCache = new TtlCache();
   const providerCooldowns = new Map();
+  const trackHistory = new AircraftTrackHistory();
+  const activeAreas = new Map();
+  let pollTimer;
+
+  async function loadAircraftArea({ latitude, longitude, radiusMiles }) {
+    const result = await fetchAircraftPositionsFromProviders({
+      fetchImpl,
+      providers: config.aircraftProviders,
+      latitude,
+      longitude,
+      radiusNauticalMiles: rounded(radiusMiles / 1.150779, 3),
+      timeoutMs: config.timeoutMs,
+      cooldowns: providerCooldowns,
+    });
+    if (result.payload === undefined || !result.provider) {
+      const lastFailure = result.failures[result.failures.length - 1];
+      const error = new Error("Aircraft data request failed.");
+      error.providerStatus = lastFailure?.status || 502;
+      throw error;
+    }
+    if (result.failures.length > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "provider_fallback",
+          feature: "Aircraft data",
+          provider: result.provider,
+          failedProviders: result.failures.map((failure) => failure.provider),
+        }),
+      );
+    }
+    trackHistory.record(result.payload);
+    return { payload: result.payload, provider: result.provider };
+  }
+
+  // Keeps track history dense between Roku refreshes by polling every
+  // AIRCRAFT_CACHE_SECONDS, but only for areas a Roku requested in the last two minutes.
+  function scheduleAircraftPolling() {
+    if (pollTimer) return;
+    pollTimer = setTimeout(async () => {
+      const now = Date.now();
+      for (const [key, area] of activeAreas) {
+        if (now - area.lastRequestedAt > ACTIVE_AREA_MS) {
+          activeAreas.delete(key);
+          continue;
+        }
+        try {
+          nearbyCache.set(key, await loadAircraftArea(area), config.aircraftCacheSeconds * 3);
+        } catch {
+          // Failures are logged by the provider fallback; the next Roku request retries.
+        }
+      }
+      pollTimer = undefined;
+      if (activeAreas.size > 0) scheduleAircraftPolling();
+    }, config.aircraftCacheSeconds * 1000);
+    pollTimer.unref?.();
+  }
   const detailsCache = new TtlCache();
   const geocodeCache = new TtlCache();
   const mapCache = new TtlCache({ maxEntries: MAP_CACHE_MAX_ENTRIES });
@@ -864,7 +1026,7 @@ export function createFlightLaneServer({
   const photoCache = new TtlCache();
   const startedAt = Date.now();
 
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     try {
       if (
         config.localNetworkOnly &&
@@ -934,42 +1096,19 @@ export function createFlightLaneServer({
         const roundedLongitude = rounded(longitude, 4);
         const roundedRadius = rounded(radiusMiles, 2);
         const cacheKey = `${roundedLatitude}/${roundedLongitude}/${roundedRadius}`;
-        const cached = await nearbyCache.getOrLoad(
-          cacheKey,
-          config.aircraftCacheSeconds,
-          async () => {
-            const radiusNauticalMiles = roundedRadius / 1.150779;
-            const result = await fetchAircraftPositionsFromProviders({
-              fetchImpl,
-              providers: config.aircraftProviders,
-              latitude: roundedLatitude,
-              longitude: roundedLongitude,
-              radiusNauticalMiles: rounded(radiusNauticalMiles, 3),
-              timeoutMs: config.timeoutMs,
-              cooldowns: providerCooldowns,
-            });
-            if (result.payload === undefined || !result.provider) {
-              const lastFailure = result.failures[result.failures.length - 1];
-              const error = new Error("Aircraft data request failed.");
-              error.providerStatus = lastFailure?.status || 502;
-              throw error;
-            }
-            if (result.failures.length > 0) {
-              console.warn(
-                JSON.stringify({
-                  event: "provider_fallback",
-                  feature: "Aircraft data",
-                  provider: result.provider,
-                  failedProviders: result.failures.map((failure) => failure.provider),
-                }),
-              );
-            }
-            return { payload: result.payload, provider: result.provider };
-          },
+        const area = {
+          latitude: roundedLatitude,
+          longitude: roundedLongitude,
+          radiusMiles: roundedRadius,
+        };
+        activeAreas.set(cacheKey, { ...area, lastRequestedAt: Date.now() });
+        const cached = await nearbyCache.getOrLoad(cacheKey, config.aircraftCacheSeconds, () =>
+          loadAircraftArea(area),
         );
+        scheduleAircraftPolling();
         refreshFlightAwareSpendIfDue();
         const payload = {
-          ...cached.value.payload,
+          ...trackHistory.annotate(cached.value.payload),
           flightLaneSource: providerDisplayName(cached.value.provider),
           flightAware: config.flightAwareKey ? flightAwareSpendStatus() : undefined,
         };
@@ -1182,6 +1321,8 @@ export function createFlightLaneServer({
       });
     }
   });
+  server.on("close", () => clearTimeout(pollTimer));
+  return server;
 }
 
 export async function startServer({
