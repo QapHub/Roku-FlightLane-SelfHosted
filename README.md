@@ -4,7 +4,7 @@
 
 Flight Lane turns a Roku into a live aircraft radar for the location you choose. It shows nearby aircraft, altitude, ground speed, heading, estimated flight phase, route details, projected movement, satellite maps, aircraft photos, and a rolling 24-hour flyover count.
 
-This repository is the self-hosted edition. A small service runs on a computer inside your home network and keeps all provider API keys off the Roku. There is no hosted Flight Lane account, access code, telemetry service, or bundled provider credential.
+This repository is the self-hosted edition. A small service runs on a computer inside your home network and talks to the data providers on the Roku's behalf. Every provider is free and needs no API key. There is no hosted Flight Lane account, access code, telemetry service, or bundled provider credential.
 
 > Flight positions and projected paths are estimates. Never use Flight Lane for navigation, separation, emergency response, or any safety-critical decision.
 
@@ -15,8 +15,6 @@ This repository is the self-hosted edition. A small service runs on a computer i
 - [Node.js 20 or newer](https://nodejs.org/en/download)
 - A free [Roku developer account](https://developer.roku.com/)
 - Roku developer mode enabled
-- A Google Maps Platform project with Maps Static API enabled (for satellite maps; address lookup uses the free US Census geocoder by default)
-- Optional: a FlightAware AeroAPI key for origin, destination, and status enrichment
 
 All helper scripts are plain Node.js, so the same `npm run` commands work in macOS Terminal, Windows PowerShell, and Linux shells. Deployment also uses `curl`, which is built into macOS and Windows 10/11.
 
@@ -36,8 +34,6 @@ All helper scripts are plain Node.js, so the same `npm run` commands work in mac
    ```dotenv
    FLIGHTLANE_API_URL=http://YOUR_COMPUTER_LAN_IP:8787
    ROKU_DEVICE_IP=YOUR_ROKU_IP
-   GOOGLE_MAPS_API_KEY=your_key
-   FLIGHTAWARE_API_KEY=optional_key
    ```
 
    `FLIGHTLANE_API_URL` must use the computer's private-network address, such as `http://192.168.1.25:8787`. Do not use `localhost`; from the Roku, `localhost` means the Roku itself.
@@ -58,7 +54,7 @@ All helper scripts are plain Node.js, so the same `npm run` commands work in mac
 
 5. Launch Flight Lane and enter the address to monitor. The resulting location is saved in the Roku app's local registry.
 
-For the complete device steps, read [Roku setup and sideloading](docs/roku-setup.md). For API accounts and cost controls, read [Provider setup](docs/provider-setup.md).
+For the complete device steps, read [Roku setup and sideloading](docs/roku-setup.md). For data sources and usage limits, read [Provider setup](docs/provider-setup.md).
 
 ## Useful commands
 
@@ -87,7 +83,7 @@ Local Flight Lane service on your computer
   `-- optional aircraft photo metadata
 ```
 
-Only `FLIGHTLANE_API_URL` is compiled into the Roku ZIP. Provider keys remain in the ignored `.env.local` file and are attached to provider requests by the local service.
+Only `FLIGHTLANE_API_URL` is compiled into the Roku ZIP. The Roku never contacts providers directly; the local service makes every provider request.
 
 The local service:
 
@@ -97,7 +93,7 @@ The local service:
 - keeps short-lived data in memory to reduce duplicate provider calls;
 - tries ADSB.lol and ADSB.fi if the configured live-aircraft provider is unavailable;
 - does not write addresses, coordinates, device identifiers, or provider responses to disk;
-- reports only feature availability—not key values—from `/health`.
+- reports only feature availability from `/health`.
 
 Never forward port `8787` from your router or expose it directly to the internet.
 
@@ -107,7 +103,17 @@ The Roku can refresh its local display more often than the service calls a provi
 
 Flight Lane tries the configured live-aircraft provider first. If that provider is blocked or temporarily unavailable, the local service falls back to ADSB.lol and then ADSB.fi. Airplanes.live currently documents a one-request-per-second limit and plan-specific daily allowances. A cache of 180 seconds is at most 480 upstream calls during 24 hours of continuous use; a 15-second cache can make up to 5,760. Choose a value permitted by your current access level and use. See [Provider setup](docs/provider-setup.md) before leaving the app running continuously.
 
-FlightAware enrichment is optional and may be billed. It is disabled when `FLIGHTAWARE_API_KEY` is blank. Successful detail responses are cached for 15 minutes by default.
+Every data provider Flight Lane uses is free and needs no account or key:
+
+| Data | Provider |
+| --- | --- |
+| Live aircraft positions | Airplanes.live, with ADSB.lol and ADSB.fi as fallbacks |
+| Satellite imagery | USDA / USGS The National Map (public domain, US coverage) |
+| Address lookup | US Census Bureau geocoder (US addresses) |
+| Flight routes (optional) | adsbdb.com |
+| Aircraft photos (optional) | Planespotters.net |
+
+The Roku shows which provider supplied the current aircraft positions and imagery below the radar, the route source with each route, and the photographer credit with each photo.
 
 ## Important Roku limitation
 
@@ -115,11 +121,11 @@ A Roku holds only one sideloaded development app at a time. Installing another d
 
 ## Privacy
 
-The street address is sent from the Roku to your computer and forwarded only for geocoding: to the US Census Bureau geocoder by default, or to Google when `GEOCODING_PROVIDER=google` or a Google geocoding key is configured. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
+The street address is sent from the Roku to your computer and forwarded only to the US Census Bureau geocoder. Flight Lane stores the selected address and coordinates on the Roku. The local service keeps a geocoding result only in memory and loses it when the service restarts.
 
-Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.lol or ADSB.fi. Map coordinates are sent to Google. A selected callsign may be sent to FlightAware, and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
+Nearby coordinates are sent to the configured live-aircraft provider or, when that provider fails, to ADSB.lol or ADSB.fi. Map coordinates are sent to the USGS National Map. A selected callsign may be sent to adsbdb.com, and a selected aircraft registration may be sent to Planespotters.net. Each provider's terms and privacy policy apply.
 
-Flight Lane contains no analytics or advertising SDK. See [SECURITY.md](SECURITY.md) for key-handling guidance.
+Flight Lane contains no analytics or advertising SDK. See [SECURITY.md](SECURITY.md) for security guidance.
 
 ## License
 

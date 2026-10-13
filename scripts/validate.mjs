@@ -55,12 +55,10 @@ runMain(() => {
     "api.airplanes.live",
     "api.adsb.lol",
     "opendata.adsb.fi",
-    "aeroapi.flightaware.com",
-    "maps.googleapis.com",
+    "api.adsbdb.com",
+    "basemap.nationalmap.gov",
+    "geocoding.geo.census.gov",
     "api.planespotters.net",
-    "x-apikey",
-    "GOOGLE_MAPS_API_KEY",
-    "FLIGHTAWARE_API_KEY",
   ];
   for (const marker of providerMarkers) {
     if (packageText.includes(marker.toLowerCase())) {

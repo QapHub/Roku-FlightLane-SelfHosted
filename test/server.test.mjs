@@ -47,11 +47,10 @@ test("private network detection accepts LAN addresses and rejects public address
   }
 });
 
-test("createConfig keeps optional provider keys disabled when blank", () => {
+test("createConfig defaults to free providers with optional lookups enabled", () => {
   const config = testConfig();
-  assert.equal(config.mapsKey, "");
-  assert.equal(config.geocodingKey, "");
-  assert.equal(config.flightAwareKey, "");
+  assert.equal(config.flightRoutesEnabled, true);
+  assert.equal(config.aircraftPhotosEnabled, true);
   assert.equal(config.localNetworkOnly, true);
   assert.deepEqual(
     config.aircraftProviders.map((provider) => provider.name),
@@ -87,21 +86,20 @@ test("photo payload normalization allows only expected HTTPS hosts", () => {
   assert.deepEqual(rejected, { available: false, registration: "N123AB" });
 });
 
-test("health and local registration never expose provider keys", async (context) => {
-  const secretValues = {
-    GOOGLE_MAPS_API_KEY: "maps-test-secret",
-    GOOGLE_GEOCODING_API_KEY: "geocode-test-secret",
-    FLIGHTAWARE_API_KEY: "flight-test-secret",
-  };
-  const server = createFlightLaneServer({ config: testConfig(secretValues) });
+test("health reports free provider features and local registration", async (context) => {
+  const server = createFlightLaneServer({ config: testConfig() });
   context.after(() => server.close());
   const baseUrl = await listen(server);
 
   const health = await fetch(`${baseUrl}/health`);
   assert.equal(health.status, 200);
-  const healthText = await health.text();
-  assert.doesNotMatch(healthText, /test-secret/);
-  assert.equal(JSON.parse(healthText).features.flightDetails, true);
+  assert.deepEqual((await health.json()).features, {
+    liveAircraft: true,
+    satelliteMaps: true,
+    addressLookup: true,
+    flightDetails: true,
+    aircraftPhotos: true,
+  });
 
   const registration = await fetch(`${baseUrl}/v1/register`, {
     method: "POST",
@@ -132,6 +130,7 @@ test("nearby requests are cached and convert statute miles to nautical miles", a
   assert.equal(second.status, 200);
   assert.equal(first.headers.get("x-flightlane-cache"), "miss");
   assert.equal(second.headers.get("x-flightlane-cache"), "hit");
+  assert.equal((await second.json()).flightLaneSource, "Airplanes.live");
   assert.equal(requestedUrls.length, 1);
   assert.match(requestedUrls[0], /\/point\/28\.5\/-81\.6\/3\.476$/);
 });
@@ -191,17 +190,7 @@ test("aircraft provider fallback supports ADSB.fi named path style", async () =>
   );
 });
 
-test("geocoding uses Census unless a dedicated Google key is configured", () => {
-  assert.equal(testConfig().geocodingProvider, "census");
-  assert.equal(testConfig({ GOOGLE_MAPS_API_KEY: "maps" }).geocodingProvider, "census");
-  assert.equal(testConfig({ GOOGLE_GEOCODING_API_KEY: "geo" }).geocodingProvider, "google");
-  const forcedGoogle = testConfig({ GEOCODING_PROVIDER: "google", GOOGLE_MAPS_API_KEY: "maps" });
-  assert.equal(forcedGoogle.geocodingProvider, "google");
-  assert.equal(forcedGoogle.geocodingKey, "maps");
-  assert.throws(() => testConfig({ GEOCODING_PROVIDER: "other" }), /GEOCODING_PROVIDER/);
-});
-
-test("Census geocoding returns the Google response shape the Roku parses", async (context) => {
+test("Census geocoding returns the response shape the Roku parses", async (context) => {
   const requestedUrls = [];
   const fetchImpl = async (url) => {
     requestedUrls.push(String(url));
@@ -243,34 +232,71 @@ test("Census geocoding returns the Google response shape the Roku parses", async
   assert.deepEqual(await geocode("99 Nowhere Rd, Nowhere"), { status: "ZERO_RESULTS", results: [] });
 });
 
-test("satellite maps are cached and honor provider cache limits", async (context) => {
-  let cacheControl = "public, max-age=86400";
+test("satellite maps request the matching USGS bounding box and are cached", async (context) => {
   const requestedUrls = [];
   const fetchImpl = async (url) => {
-    requestedUrls.push(String(url));
+    requestedUrls.push(new URL(url));
     return new Response(Buffer.from([0xff, 0xd8, 0xff, 0xd9]), {
-      headers: { "Content-Type": "image/jpeg", "Cache-Control": cacheControl },
+      headers: { "Content-Type": "image/jpeg", "Cache-Control": "max-age=0,must-revalidate" },
     });
   };
-  const server = createFlightLaneServer({
-    config: testConfig({ GOOGLE_MAPS_API_KEY: "maps-test-secret" }),
-    fetchImpl,
-  });
+  const server = createFlightLaneServer({ config: testConfig(), fetchImpl });
   context.after(() => server.close());
   const baseUrl = await listen(server);
 
-  const cached = "/v1/map?latitude=28.5&longitude=-81.6&zoom=15";
-  const [first, second] = await Promise.all([fetch(baseUrl + cached), fetch(baseUrl + cached)]);
-  const third = await fetch(baseUrl + cached);
+  const query = "/v1/map?latitude=0&longitude=0&zoom=1&size=256";
+  const [first, second] = await Promise.all([fetch(baseUrl + query), fetch(baseUrl + query)]);
+  const third = await fetch(baseUrl + query);
   assert.equal(first.status, 200);
   assert.equal(second.status, 200);
   assert.equal(third.headers.get("x-flightlane-cache"), "hit");
+  assert.equal(third.headers.get("x-flightlane-attribution"), "USDA, USGS The National Map");
   assert.deepEqual([...new Uint8Array(await third.arrayBuffer())], [0xff, 0xd8, 0xff, 0xd9]);
   assert.equal(requestedUrls.length, 1);
 
-  cacheControl = "no-store";
-  const uncached = "/v1/map?latitude=28.6&longitude=-81.6&zoom=15";
-  await (await fetch(baseUrl + uncached)).arrayBuffer();
-  await (await fetch(baseUrl + uncached)).arrayBuffer();
-  assert.equal(requestedUrls.length, 3);
+  const [providerUrl] = requestedUrls;
+  assert.equal(providerUrl.hostname, "basemap.nationalmap.gov");
+  assert.equal(providerUrl.searchParams.get("size"), "512,512");
+  // At zoom 1, 256 logical pixels span half the world: x and y from -1/4 to +1/4 of the circumference.
+  const quarter = (Math.PI * 6378137) / 2;
+  assert.deepEqual(
+    providerUrl.searchParams.get("bbox").split(",").map(Number),
+    [-quarter, -quarter, quarter, quarter].map((value) => Math.round(value * 100) / 100),
+  );
+  assert.equal(providerUrl.searchParams.has("key"), false);
+});
+
+test("flight routes come from adsbdb and unknown callsigns return no flights", async (context) => {
+  const requestedUrls = [];
+  const fetchImpl = async (url) => {
+    requestedUrls.push(String(url));
+    if (String(url).endsWith("/AAL100")) {
+      return Response.json({
+        response: {
+          flightroute: {
+            callsign_icao: "AAL100",
+            callsign_iata: "AA100",
+            airline: { name: "American Airlines" },
+            origin: { iata_code: "JFK", icao_code: "KJFK", name: "John F Kennedy International Airport" },
+            destination: { iata_code: "LHR", icao_code: "EGLL", name: "London Heathrow Airport" },
+          },
+        },
+      });
+    }
+    return Response.json({ response: "unknown callsign" }, { status: 404 });
+  };
+  const server = createFlightLaneServer({ config: testConfig(), fetchImpl });
+  context.after(() => server.close());
+  const baseUrl = await listen(server);
+
+  const known = await (await fetch(`${baseUrl}/v1/flights/AAL100`)).json();
+  assert.equal(known.source, "adsbdb.com");
+  assert.equal(known.flights[0].ident_iata, "AA100");
+  assert.equal(known.flights[0].origin.code_iata, "JFK");
+  assert.equal(known.flights[0].destination.code_icao, "EGLL");
+  assert.equal(requestedUrls[0], "https://api.adsbdb.com/v0/callsign/AAL100");
+
+  const unknown = await fetch(`${baseUrl}/v1/flights/N12345`);
+  assert.equal(unknown.status, 200);
+  assert.deepEqual((await unknown.json()).flights, []);
 });

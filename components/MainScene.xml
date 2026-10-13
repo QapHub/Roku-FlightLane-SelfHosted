@@ -36,6 +36,7 @@
             <Label translation="[26,565]" width="70" height="36" text="W" color="0x7DD3FCFF" horizAlign="center" />
             <Label translation="[850,565]" width="70" height="36" text="E" color="0x7DD3FCFF" horizAlign="center" />
             <Label id="rangeLabel" translation="[70,935]" width="360" height="42" color="0x7DD3FCFF" />
+            <Label id="dataSourceLabel" translation="[440,935]" width="430" height="42" color="0x8DA8C2FF" horizAlign="right" vertAlign="center" font="font:SmallestSystemFont" />
 
             <Label translation="[930,165]" width="340" height="42" text="NEARBY AIRCRAFT" color="0x8DA8C2FF" />
             <LabelList id="aircraftList" translation="[920,215]" itemSize="[350,56]" numRows="6" color="0x9EB5C9FF" focusedColor="0xFFFFFFFF" />
@@ -50,12 +51,7 @@
                     <Poster id="closeupSatelliteMapB" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" visible="false" />
                     <Rectangle width="320" height="320" color="0x06131F33" />
                     <Group id="closeupMarkerLayer" />
-                    <Group id="closeupAttributionClipA" clippingRect="[0,0,320,12]" visible="false">
-                        <Poster id="closeupAttributionA" translation="[0,-308]" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" />
-                    </Group>
-                    <Group id="closeupAttributionClipB" clippingRect="[0,0,320,12]" visible="false">
-                        <Poster id="closeupAttributionB" translation="[0,-308]" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" />
-                    </Group>
+                    <Label id="closeupImageryCredit" translation="[0,298]" width="314" height="20" text="IMAGERY: USGS" color="0xDDF4FFCC" horizAlign="right" vertAlign="center" font="font:SmallestSystemFont" visible="false" />
                 </Group>
             </Group>
 

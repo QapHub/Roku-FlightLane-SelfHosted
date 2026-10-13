@@ -62,7 +62,7 @@ Verify it locally:
 curl http://localhost:8787/health
 ```
 
-The health response reports which optional features have keys configured. It never returns the keys.
+The health response reports which optional features are enabled.
 
 ## 4. Install Flight Lane
 

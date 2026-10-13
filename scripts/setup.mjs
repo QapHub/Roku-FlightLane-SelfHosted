@@ -36,7 +36,6 @@ runMain(() => {
   console.log("");
   console.log("Next:");
   console.log("  1. Edit .env.local and replace both example IP addresses.");
-  console.log("  2. Add your Google API key(s) and optional FlightAware key.");
-  console.log("  3. Run npm run api and leave that terminal open.");
-  console.log("  4. In a second terminal, run npm run deploy.");
+  console.log("  2. Run npm run api and leave that terminal open.");
+  console.log("  3. In a second terminal, run npm run deploy.");
 });

@@ -1,8 +1,8 @@
 # Security
 
-## Provider credentials
+## Provider data
 
-Store provider keys only in `.env.local`. That file is ignored by Git. The build writes only the local service URL to `source/config.generated.brs`, and that generated file is ignored as well.
+Flight Lane uses only free providers that need no keys. Keep `.env.local` out of Git anyway; it holds your network addresses. The build writes only the local service URL to `source/config.generated.brs`, and that generated file is ignored as well.
 
 Before sharing a ZIP or commit, run:
 
@@ -11,9 +11,7 @@ npm run check
 git status --short
 ```
 
-The validation task inspects the Roku package for provider hostnames, header names, and environment-variable markers that belong only on the local computer.
-
-Restrict each provider key to the smallest set of APIs possible and enable usage alerts. Rotate a key immediately if it is committed, pasted into an issue, included in a screenshot, or otherwise disclosed.
+The validation task inspects the Roku package for provider hostnames that belong only on the local computer, so the Roku always talks to your local service rather than to providers directly.
 
 ## Local network boundary
 

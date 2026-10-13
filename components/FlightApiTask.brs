@@ -141,6 +141,7 @@ function FetchNearbyAircraft(params as object) as object
         aircraft: aircraft
         counterAircraft: counterAircraft
         updatedAt: data.now
+        source: StringOr(data.flightLaneSource, "")
     })
 end function
 
@@ -409,7 +410,7 @@ function FetchFlightDetails(params as object) as object
 
     url = config.flightLaneApiUrl + "/v1/flights/" + UrlEncode(callsign)
     response = HttpRequest(url, AuthHeaders(params))
-    print "Flight Lane debug: FlightAware lookup for "; callsign; " HTTP "; response.code
+    print "Flight Lane debug: route lookup for "; callsign; " HTTP "; response.code
     data = ParseJsonBody(response.body)
     if response.code < 200 or response.code >= 300 or data = invalid
         result = FailureResult("flightDetails", ResponseError(response, data), response.code)
@@ -445,6 +446,7 @@ function FetchFlightDetails(params as object) as object
         estimatedOn: StringOr(selectedFlight.estimated_on, "")
         actualOn: StringOr(selectedFlight.actual_on, "")
         routeDistanceMiles: NumberOr(selectedFlight.route_distance, 0)
+        source: StringOr(data.source, "")
     })
 end function
 

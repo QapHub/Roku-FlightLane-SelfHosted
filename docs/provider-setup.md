@@ -40,57 +40,30 @@ Examples:
 
 The interface animates projected motion between responses, but a longer cache means less authoritative position correction. Do not set a shorter interval than your provider access permits.
 
-FlightAware is not used for live position fallback by default because its position-search endpoints may be billed. The FlightAware key below is used only for optional route enrichment.
-
 ## Address lookup
 
-By default, address lookup uses the free [US Census Bureau geocoder](https://geocoding.geo.census.gov/geocoder/). It needs no account or key but matches US street addresses only, so include the street, city, state, and ZIP code.
-
-To use Google instead (for example, for addresses the Census geocoder cannot match), enable the [Geocoding API](https://developers.google.com/maps/documentation/geocoding/get-api-key) and set either:
-
-```dotenv
-GOOGLE_GEOCODING_API_KEY=your_geocoding_key
-```
-
-or `GEOCODING_PROVIDER=google` to reuse `GOOGLE_MAPS_API_KEY`. Address lookup runs only when you enter an address, and results are cached in memory for 24 hours.
+Address lookup uses the free [US Census Bureau geocoder](https://geocoding.geo.census.gov/geocoder/). It needs no account or key but matches US street addresses only, so include the street, city, state, and ZIP code. Lookup runs only when you enter an address, and results are cached in memory for 24 hours.
 
 ## Satellite maps
 
-Create a Google Maps Platform project and enable billing. Enable the [Maps Static API](https://developers.google.com/maps/documentation/maps-static/get-api-key), create an API key, and add:
+Satellite maps use public-domain USDA NAIP and USGS orthoimagery from [The National Map](https://www.usgs.gov/programs/national-geospatial-program/national-map). No account or key is needed. Coverage is limited to the United States; outside it, the map area is blank while the radar still works.
 
 ```dotenv
-GOOGLE_MAPS_API_KEY=your_maps_key
+MAP_CACHE_SECONDS=86400
 ```
 
-To keep usage low, the local service:
-
-- keeps each map image in memory for up to `MAP_CACHE_SECONDS` (default 24 hours, never longer than Google's own `Cache-Control` allows) and shares one provider call among simultaneous requests for the same image;
-- serves the home overview map from that cache after the first request;
-- receives close-up maps whose centers the Roku snaps to a fixed grid, so a slow or parked aircraft reuses one image instead of requesting a new one every refresh.
-
-A fast-moving selected aircraft can still need a new close-up image on most refreshes. Set budget alerts before leaving the app running continuously with an aircraft selected.
-
-Recommended controls in Google Maps Platform:
-
-- apply API restrictions so the key can call only Maps Static API (and Geocoding API if you use it);
-- set quota alerts and budgets;
-- if your home has a stable public IP, consider an IP application restriction;
-- never put the key directly in BrightScript or commit `.env.local`.
-
-Satellite maps will not work without the Maps Static API. Live aircraft data can still work after a location is already saved.
+The local service requests one finished image per map view and keeps it in memory for `MAP_CACHE_SECONDS` (default 24 hours; `0` disables reuse). Simultaneous requests for the same image share one provider call. The Roku also snaps close-up map centers to a fixed grid, so a slow or parked aircraft reuses one image instead of requesting a new one every refresh. The imagery has no road or place labels.
 
 ## Flight route details
 
-[FlightAware AeroAPI](https://www.flightaware.com/commercial/aeroapi/) supplies optional origin, destination, timing, and status data.
+[adsbdb.com](https://www.adsbdb.com/) supplies optional origin and destination airports for a callsign. No key is needed.
 
 ```dotenv
-FLIGHTAWARE_API_KEY=your_aeroapi_key
-FLIGHT_DETAILS_CACHE_SECONDS=900
+ENABLE_FLIGHT_ROUTES=true
+FLIGHT_DETAILS_CACHE_SECONDS=86400
 ```
 
-Leave the key blank to disable this enrichment. The radar, altitude, speed, heading, phase, and projected motion still work from live position data.
-
-AeroAPI may charge by request or result set. Flight Lane caches a callsign's successful response for 15 minutes by default. Increase `FLIGHT_DETAILS_CACHE_SECONDS` to reduce lookups, especially near a busy airport. Review usage in the AeroAPI portal and configure the account controls available to you.
+These are the typical route for a flight number, not live flight status, so departure and arrival times are not available. Private and general-aviation callsigns usually have no route. Set `ENABLE_FLIGHT_ROUTES=false` to stop sending selected callsigns to adsbdb.com. The radar, altitude, speed, heading, phase, and projected motion still work from live position data.
 
 ## Aircraft photos
 

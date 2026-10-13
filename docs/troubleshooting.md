@@ -36,16 +36,15 @@ npm run diagnose
 
 ## Address lookup fails
 
-- The default Census geocoder matches US street addresses only. Include street, city, state, and ZIP code.
-- For addresses Census cannot match, set `GOOGLE_GEOCODING_API_KEY` (or `GEOCODING_PROVIDER=google`), enable the Google Geocoding API and billing, and confirm the key's API restriction permits it.
+- The Census geocoder matches US street addresses only. Include street, city, state, and ZIP code.
+- Try the address at [geocoding.geo.census.gov](https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?form). If it fails there, try a nearby street address.
 - Check the local service health response: `addressLookup` should be `true`.
 
 ## Satellite map is blank
 
-- Enable Maps Static API and billing.
-- Confirm the key's API restrictions include Maps Static API.
-- Check the local service health response: `satelliteMaps` should be `true`.
-- Google may reject requests when quota or billing is unavailable.
+- Imagery covers the United States only.
+- Watch the `npm run api` terminal for `provider_error` messages with `"feature":"Satellite map"`; the USGS National Map service is occasionally down for maintenance.
+- Restarting the local service clears its in-memory map cache.
 
 ## Aircraft are missing
 
@@ -60,10 +59,9 @@ Small aircraft may not broadcast usable ADS-B positions, may be outside receiver
 
 ## Route or destination is unavailable
 
-- `FLIGHTAWARE_API_KEY` is optional; confirm it is present if route details are wanted.
-- Check the local service health response: `flightDetails` should be `true`.
-- Some private, general-aviation, blocked, or incomplete flights have no matching public route.
-- FlightAware errors can also indicate account limits, billing, or a key restriction.
+- Confirm `ENABLE_FLIGHT_ROUTES` is not `false`. The local service health response should report `flightDetails: true`.
+- Routes come from adsbdb.com's callsign database. Private, general-aviation, charter, and new flight numbers often have no entry.
+- The route shown is the typical route for that flight number; a diverted or substituted flight can differ.
 
 ## Another development app disappeared
 

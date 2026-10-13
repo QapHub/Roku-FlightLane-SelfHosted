@@ -19,8 +19,7 @@ sub init()
     m.closeupPip = m.top.FindNode("closeupPip")
     m.closeupPipTitle = m.top.FindNode("closeupPipTitle")
     m.closeupSatelliteMaps = [m.top.FindNode("closeupSatelliteMapA"), m.top.FindNode("closeupSatelliteMapB")]
-    m.closeupAttributions = [m.top.FindNode("closeupAttributionA"), m.top.FindNode("closeupAttributionB")]
-    m.closeupAttributionClips = [m.top.FindNode("closeupAttributionClipA"), m.top.FindNode("closeupAttributionClipB")]
+    m.closeupImageryCredit = m.top.FindNode("closeupImageryCredit")
     m.closeupMapActiveIndex = 0
     m.closeupMapPendingIndex = -1
     m.closeupMapStates = [
@@ -29,6 +28,7 @@ sub init()
     ]
     m.closeupMarkerLayer = m.top.FindNode("closeupMarkerLayer")
     m.rangeLabel = m.top.FindNode("rangeLabel")
+    m.dataSourceLabel = m.top.FindNode("dataSourceLabel")
     m.aircraftList = m.top.FindNode("aircraftList")
     m.emptyLabel = m.top.FindNode("emptyLabel")
     m.flyoverCountLabel = m.top.FindNode("flyoverCountLabel")
@@ -179,8 +179,6 @@ sub ReleaseOptionalVisualCaches()
     for mapIndex = 0 to m.closeupSatelliteMaps.Count() - 1
         m.closeupSatelliteMaps[mapIndex].uri = ""
         m.closeupSatelliteMaps[mapIndex].visible = false
-        m.closeupAttributions[mapIndex].uri = ""
-        m.closeupAttributionClips[mapIndex].visible = false
         m.closeupMapStates[mapIndex] = {
             url: ""
             centerEastMiles: invalid
@@ -351,9 +349,6 @@ sub ConfigureMapAuthorization()
     m.satelliteMap.SetHeaders(headers)
     for each mapPoster in m.closeupSatelliteMaps
         mapPoster.SetHeaders(headers)
-    end for
-    for each attributionPoster in m.closeupAttributions
-        attributionPoster.SetHeaders(headers)
     end for
 end sub
 
@@ -829,8 +824,7 @@ sub UpdateCloseupPip(aircraft as object)
         mapUrl = SatelliteMapUrl(centerCoordinates.latitude, centerCoordinates.longitude, mapSettings.zoom)
         QueueCloseupMap(mapUrl, mapSettings.displaySize, mapCenterPosition, aircraft.callsign, mapSettings.zoom)
     else
-        m.closeupAttributionClips[0].visible = false
-        m.closeupAttributionClips[1].visible = false
+        m.closeupImageryCredit.visible = false
     end if
     DrawCloseupPip()
 end sub
@@ -859,8 +853,6 @@ sub QueueCloseupMap(mapUrl as string, displaySize as float, mapCenterPosition as
     pendingMap.width = displaySize
     pendingMap.height = displaySize
     pendingMap.translation = [baseOffset, baseOffset]
-    m.closeupAttributionClips[pendingIndex].visible = false
-    m.closeupAttributions[pendingIndex].uri = mapUrl
     print "Flight Lane debug: PIP preloading="; callsign; " radius="; m.config.closeupRadiusFeet; "ft zoom="; zoom; " smooth=0.2s"
     pendingMap.uri = mapUrl
 end sub
@@ -951,15 +943,13 @@ sub HandleCloseupSatelliteLoadStatus(mapIndex as integer, loadStatus as string)
     if loadStatus = "ready"
         oldIndex = m.closeupMapActiveIndex
         m.closeupSatelliteMaps[oldIndex].visible = false
-        m.closeupAttributionClips[oldIndex].visible = false
         m.closeupMapActiveIndex = mapIndex
         m.closeupMapPendingIndex = -1
         m.closeupSatelliteMaps[mapIndex].visible = true
-        m.closeupAttributionClips[mapIndex].visible = true
+        m.closeupImageryCredit.visible = true
         PositionCloseupPip()
     else if loadStatus = "failed"
         m.closeupSatelliteMaps[mapIndex].visible = false
-        m.closeupAttributionClips[mapIndex].visible = false
         m.closeupMapPendingIndex = -1
     end if
 end sub
@@ -1157,12 +1147,32 @@ sub OnApiResult(event as object)
     end if
 end sub
 
+sub ShowDataSources(aircraftSource as string)
+    parts = []
+    if aircraftSource <> ""
+        parts.Push("AIRCRAFT: " + UCase(aircraftSource))
+    end if
+    if m.config.satelliteMapEnabled
+        parts.Push("IMAGERY: USGS")
+    end if
+    text = ""
+    for each part in parts
+        if text <> ""
+            text = text + "  •  "
+        end if
+        text = text + part
+    end for
+    m.dataSourceLabel.text = text
+end sub
+
 sub HandleNearbyResult(result as object)
     if result.ok <> true
         m.statusLabel.text = "DATA ERROR — " + result.errorMessage
         m.statusLabel.color = "0xFCA5A5FF"
         return
     end if
+
+    ShowDataSources(StringOr(result.data.source, ""))
 
     counterAircraft = result.data.counterAircraft
     if counterAircraft = invalid
@@ -1601,7 +1611,10 @@ sub ShowFlightDetails(details as object)
     if details.status <> ""
         m.flightStatusValue.text = details.status
     else
-        m.flightStatusValue.text = "FlightAware route match"
+        m.flightStatusValue.text = "Typical route for this flight number"
+        if IsNonEmptyString(details.source)
+            m.flightStatusValue.text = m.flightStatusValue.text + "  •  " + details.source
+        end if
     end if
     departureTime = PreferredTime(details.actualOff, details.estimatedOff, details.scheduledOff)
     arrivalTime = PreferredTime(details.actualOn, details.estimatedOn, details.scheduledOn)
