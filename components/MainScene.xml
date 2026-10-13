@@ -51,7 +51,7 @@
                     <Poster id="closeupSatelliteMapB" width="320" height="320" uri="pkg:/images/map-backdrop.jpg" loadDisplayMode="scaleToFill" visible="false" />
                     <Rectangle width="320" height="320" color="0x06131F33" />
                     <Group id="closeupMarkerLayer" />
-                    <Label id="closeupImageryCredit" translation="[0,298]" width="314" height="20" text="IMAGERY: USGS" color="0xDDF4FFCC" horizAlign="right" vertAlign="center" font="font:SmallestSystemFont" visible="false" />
+                    <Label id="closeupImageryCredit" translation="[0,298]" width="314" height="20" text="Imagery: USGS" color="0xDDF4FFCC" horizAlign="right" vertAlign="center" font="font:SmallestSystemFont" visible="false" />
                 </Group>
             </Group>
 
@@ -91,10 +91,10 @@
             <Label id="projectionValue" translation="[1320,710]" width="520" height="70" wrap="true" numLines="2" text="—" color="0x7DD3FCFF" />
 
             <Label translation="[1320,805]" width="250" height="32" text="ROUTE" color="0x7896B0FF" />
-            <Label id="routeValue" translation="[1320,840]" width="520" height="44" text="Looking up route…" color="0xFFFFFFFF" />
-            <Label id="flightStatusValue" translation="[1320,890]" width="520" height="34" color="0x9EB5C9FF" />
-            <Label id="departureValue" translation="[1320,930]" width="520" height="32" color="0x7896B0FF" />
-            <Label id="arrivalValue" translation="[1320,964]" width="520" height="32" color="0x7896B0FF" />
+            <Label id="routeValue" translation="[1320,840]" width="520" height="44" text="Looking up route…" color="0xFFFFFFFF" font="font:SmallSystemFont" />
+            <Label id="flightStatusValue" translation="[1320,890]" width="520" height="34" color="0x9EB5C9FF" font="font:SmallestSystemFont" />
+            <Label id="departureValue" translation="[1320,930]" width="520" height="32" color="0x7896B0FF" font="font:SmallestSystemFont" />
+            <Label id="arrivalValue" translation="[1320,964]" width="520" height="32" color="0x7896B0FF" font="font:SmallestSystemFont" />
         </Group>
 
         <Group id="settingsPanel" visible="false">

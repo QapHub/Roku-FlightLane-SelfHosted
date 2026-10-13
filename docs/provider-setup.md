@@ -73,7 +73,7 @@ With a key, the local service makes two kinds of AeroAPI request:
 Before each billed lookup, the service checks, in order:
 
 1. **Cache:** each callsign's result is reused for `FLIGHTAWARE_CACHE_TTL` minutes (default 1440, 24 hours), including callsigns FlightAware does not know.
-2. **Monthly spend:** month-to-date spend comes from `total_cost` in the usage response, covering every key on your account, before volume discounts. FlightAware updates it every 10 minutes, so the service adds calls made since the last reading at your account's average cost per result page. At `FLIGHTAWARE_API_SPEND_WARNING` (default $5) the Roku shows an amber warning; at `FLIGHTAWARE_API_SPEND_LIMIT` (default $10) billed lookups stop until next month and the Roku shows a red notice.
+2. **Monthly spend:** month-to-date spend comes from `total_cost` in the usage response, covering every key on your account, before volume discounts. FlightAware updates it every 10 minutes, so the service adds calls made since the last reading at your account's average cost per result page. The Roku shows the spend above **FLIGHT PHASE**, for example `FlightAware API: $5.40 of $10`. It turns amber at `FLIGHTAWARE_API_SPEND_WARNING` (default $5). At `FLIGHTAWARE_API_SPEND_LIMIT` (default $10) it turns red and reads `· paused`, and billed lookups stop until next month.
 3. **Spend known:** if usage cannot be read for 30 minutes (wrong key, outage), billed lookups pause rather than risk unmonitored charges.
 4. **Daily cap:** at most `FLIGHTAWARE_DAILY_LIMIT` billed lookups per UTC day (default 25), as a backstop between usage readings.
 

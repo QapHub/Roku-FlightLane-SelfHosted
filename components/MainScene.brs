@@ -1151,15 +1151,15 @@ end sub
 sub ShowDataSources(aircraftSource as string)
     parts = []
     if aircraftSource <> ""
-        parts.Push("AIRCRAFT: " + UCase(aircraftSource))
+        parts.Push("Data: " + aircraftSource)
     end if
     if m.config.satelliteMapEnabled
-        parts.Push("IMAGERY: USGS")
+        parts.Push("Imagery: USGS")
     end if
     text = ""
     for each part in parts
         if text <> ""
-            text = text + "  •  "
+            text = text + " · "
         end if
         text = text + part
     end for
@@ -1177,19 +1177,19 @@ sub ShowFlightAwareSpendNotice(spend as dynamic)
     cost = FormatDollars(spend.monthToDateCost)
     limit = FormatDollars(spend.limit)
     if state = "limit"
-        m.spendNoticeLabel.text = "FLIGHTAWARE LIMIT REACHED: " + cost + " OF " + limit + " — LIVE STATUS PAUSED"
+        m.spendNoticeLabel.text = "FlightAware API: " + cost + " of " + limit + " · paused"
         m.spendNoticeLabel.color = "0xFCA5A5FF"
     else if state = "warning"
-        m.spendNoticeLabel.text = "FLIGHTAWARE SPEND WARNING: " + cost + " THIS MONTH (LIMIT " + limit + ")"
+        m.spendNoticeLabel.text = "FlightAware API: " + cost + " of " + limit
         m.spendNoticeLabel.color = "0xFBBF24FF"
     else if state = "unavailable"
-        m.spendNoticeLabel.text = "FLIGHTAWARE USAGE UNAVAILABLE — LIVE STATUS PAUSED"
+        m.spendNoticeLabel.text = "FlightAware API: usage unknown · paused"
         m.spendNoticeLabel.color = "0xFBBF24FF"
     else if state = "checking"
-        m.spendNoticeLabel.text = "FlightAware: checking this month's usage…"
+        m.spendNoticeLabel.text = "FlightAware API: checking usage…"
         m.spendNoticeLabel.color = "0x8DA8C2FF"
     else
-        m.spendNoticeLabel.text = "FlightAware: " + cost + " this month of " + limit + " limit"
+        m.spendNoticeLabel.text = "FlightAware API: " + cost + " of " + limit
         m.spendNoticeLabel.color = "0x8DA8C2FF"
     end if
     m.spendNoticeLabel.visible = true
@@ -1569,14 +1569,14 @@ sub ApplyCachedFlightDetails(aircraft as object)
 
     if m.config.flightLaneApiUrl = "" or m.localToken = ""
         m.routeValue.text = "Route details unavailable"
-        m.flightStatusValue.text = "Flight Lane secure connection is required"
+        m.flightStatusValue.text = "Local service connection required"
         m.departureValue.text = ""
         m.arrivalValue.text = ""
         return
     end if
 
-    m.routeValue.text = "Looking up origin and destination…"
-    m.flightStatusValue.text = "Flight details are cached for this session."
+    m.routeValue.text = "Looking up route…"
+    m.flightStatusValue.text = ""
     m.departureValue.text = ""
     m.arrivalValue.text = ""
     RequestSelectedFlightDetails()
@@ -1641,11 +1641,11 @@ end sub
 
 sub ShowFlightDetails(details as object)
     if details.available <> true
-        m.routeValue.text = "Route unavailable for this aircraft"
+        m.routeValue.text = "Route unavailable"
         if IsNonEmptyString(details.errorMessage)
             m.flightStatusValue.text = details.errorMessage
         else
-            m.flightStatusValue.text = "Private, unscheduled, or unmatched flight"
+            m.flightStatusValue.text = "Private or unmatched flight"
         end if
         m.departureValue.text = ""
         m.arrivalValue.text = ""
@@ -1656,12 +1656,12 @@ sub ShowFlightDetails(details as object)
     if details.status <> ""
         m.flightStatusValue.text = details.status
         if IsNonEmptyString(details.source)
-            m.flightStatusValue.text = m.flightStatusValue.text + "  •  " + details.source
+            m.flightStatusValue.text = m.flightStatusValue.text + " · " + details.source
         end if
     else
-        m.flightStatusValue.text = "Typical route for this flight number"
+        m.flightStatusValue.text = "Typical route"
         if IsNonEmptyString(details.source)
-            m.flightStatusValue.text = m.flightStatusValue.text + "  •  " + details.source
+            m.flightStatusValue.text = m.flightStatusValue.text + " · " + details.source
         end if
     end if
     departureTime = PreferredTime(details.actualOff, details.estimatedOff, details.scheduledOff)

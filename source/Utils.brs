@@ -81,8 +81,12 @@ function UrlEncode(value as dynamic) as string
     return transfer.Escape(value.ToStr())
 end function
 
+' Whole amounts drop the cents: $10, $5.40.
 function FormatDollars(value as dynamic) as string
     cents = Int((NumberOr(value, 0) * 100) + 0.5)
+    if cents mod 100 = 0
+        return "$" + Int(cents / 100).ToStr()
+    end if
     return "$" + Int(cents / 100).ToStr() + "." + PadTwo(cents mod 100)
 end function
 
