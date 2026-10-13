@@ -87,6 +87,8 @@ export function promptHidden(question) {
   return new Promise((resolve, reject) => {
     let value = "";
     const onData = (chunk) => {
+      // Terminals may wrap pasted text in bracketed-paste markers; they are not part of it.
+      chunk = String(chunk).replace(/\u001b\[20[01]~/g, "");
       for (const character of chunk) {
         if (character === "\r" || character === "\n" || character === "\u0004") {
           cleanup();
