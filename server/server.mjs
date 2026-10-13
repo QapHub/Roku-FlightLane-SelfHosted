@@ -178,7 +178,10 @@ function booleanSetting(environment, name, fallback) {
 
 export function createConfig(environment) {
   const config = buildConfig(environment);
-  if (config.flightAwareSpendWarning > config.flightAwareSpendLimit) {
+  if (
+    config.flightAwareSpendWarning !== undefined &&
+    config.flightAwareSpendWarning > config.flightAwareSpendLimit
+  ) {
     throw new Error(
       "FLIGHTAWARE_API_SPEND_WARNING must not be greater than FLIGHTAWARE_API_SPEND_LIMIT.",
     );
@@ -215,13 +218,11 @@ function buildConfig(environment) {
     flightAwareCacheSeconds:
       numberSetting(environment, "FLIGHTAWARE_CACHE_TTL", 1440, 15, 10080) * 60,
     flightAwareDailyLimit: numberSetting(environment, "FLIGHTAWARE_DAILY_LIMIT", 500, 0, 10000),
-    flightAwareSpendWarning: numberSetting(
-      environment,
-      "FLIGHTAWARE_API_SPEND_WARNING",
-      5,
-      0,
-      100000,
-    ),
+    // Optional: when unset, spending is still limited but never shown on screen.
+    flightAwareSpendWarning:
+      String(environment.FLIGHTAWARE_API_SPEND_WARNING ?? "").trim() === ""
+        ? undefined
+        : numberSetting(environment, "FLIGHTAWARE_API_SPEND_WARNING", 0, 0, 100000),
     flightAwareSpendLimit: numberSetting(environment, "FLIGHTAWARE_API_SPEND_LIMIT", 10, 0, 100000),
     flightDetailsCacheSeconds: numberSetting(
       environment,
@@ -768,7 +769,10 @@ export function createFlightLaneServer({
         flightAwareSpend.checkedAt === 0 && flightAwareSpend.refreshing ? "checking" : "unavailable";
     } else if (estimated >= config.flightAwareSpendLimit) {
       state = "limit";
-    } else if (estimated >= config.flightAwareSpendWarning) {
+    } else if (
+      config.flightAwareSpendWarning !== undefined &&
+      estimated >= config.flightAwareSpendWarning
+    ) {
       state = "warning";
     }
     if (state !== flightAwareSpend.loggedState && state !== "checking") {
@@ -789,6 +793,7 @@ export function createFlightLaneServer({
       warning: config.flightAwareSpendWarning,
       limit: config.flightAwareSpendLimit,
       dailyPercent: flightAwareBudget.percentUsed(),
+      showSpend: config.flightAwareSpendWarning !== undefined,
     };
   }
 
@@ -1193,7 +1198,11 @@ export async function startServer({
   console.log(
     `Features: maps=usgs geocoding=census flightRoutes=${config.flightRoutesEnabled} flightAware=${
       config.flightAwareKey
-        ? `preferred, warn $${config.flightAwareSpendWarning}, limit $${config.flightAwareSpendLimit}, ${config.flightAwareDailyLimit}/day`
+        ? `preferred, ${
+            config.flightAwareSpendWarning === undefined
+              ? "spend not shown"
+              : `warn $${config.flightAwareSpendWarning}`
+          }, limit $${config.flightAwareSpendLimit}, ${config.flightAwareDailyLimit}/day`
         : "off"
     } photos=${
       config.aircraftPhotosEnabled

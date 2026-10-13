@@ -1178,6 +1178,11 @@ sub ShowFlightAwareSpendNotice(spend as dynamic)
     if IsNumericValue(spend.dailyPercent)
         m.flightAwareDailyPercent = Int(spend.dailyPercent)
     end if
+    ' Spending appears only when FLIGHTAWARE_API_SPEND_WARNING is set; the limit applies either way.
+    if not IsTrue(spend.showSpend)
+        m.spendNoticeLabel.visible = false
+        return
+    end if
     state = StringOr(spend.state, "")
     cost = FormatDollars(spend.monthToDateCost)
     limit = FormatDollars(spend.limit)

@@ -45,8 +45,9 @@ runMain(async () => {
           );
         } else {
           const cost = spend.monthToDateCost === undefined ? "checking" : `$${spend.monthToDateCost}`;
+          const warning = spend.warning === undefined ? "not shown on screen" : `$${spend.warning}`;
           console.log(
-            `     FlightAware: ${spend.state}, ${cost} this month (warning $${spend.warning}, limit $${spend.limit})`,
+            `     FlightAware: ${spend.state}, ${cost} this month (warning ${warning}, limit $${spend.limit})`,
           );
         }
       } else {

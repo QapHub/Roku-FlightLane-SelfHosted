@@ -398,7 +398,7 @@ test("FlightAware is preferred when a key is set, cached, and capped per day", a
 test("FlightAware usage is read for this month and reported to the Roku", async (context) => {
   const { baseUrl, lookup, requestedUrls } = await flightAwareServer(
     context,
-    {},
+    { FLIGHTAWARE_API_SPEND_WARNING: "5" },
     { totalCost: 5.5 },
   );
   await lookup("AAL100");
@@ -416,11 +416,16 @@ test("FlightAware usage is read for this month and reported to the Roku", async 
     warning: 5,
     limit: 10,
     dailyPercent: 0,
+    showSpend: true,
   });
 });
 
 test("FlightAware calls stop at the spend limit or when usage cannot be read", async (context) => {
-  const overLimit = await flightAwareServer(context, {}, { totalCost: 10.01 });
+  const overLimit = await flightAwareServer(
+    context,
+    { FLIGHTAWARE_API_SPEND_WARNING: "5" },
+    { totalCost: 10.01 },
+  );
   const limited = await overLimit.lookup("AAL100");
   assert.equal(overLimit.billedCalls(), 0);
   assert.equal(limited.source, undefined, "routes fall back to adsbdb.com at the spend limit");
@@ -479,4 +484,23 @@ test("selectCurrentFlight picks the flight being flown now from a flight number'
   assert.equal(selectCurrentFlight([staleEnRoute, nextLeg], now), nextLeg);
 
   assert.equal(selectCurrentFlight([{ cancelled: true }], now), undefined);
+});
+
+test("without a spend warning, spending is hidden but the spend limit still applies", async (context) => {
+  assert.equal(testConfig().flightAwareSpendWarning, undefined);
+  assert.equal(testConfig({ FLIGHTAWARE_API_SPEND_WARNING: "" }).flightAwareSpendWarning, undefined);
+
+  const { baseUrl, lookup, billedCalls } = await flightAwareServer(context, {}, { totalCost: 7 });
+  await lookup("AAL100");
+  assert.equal(billedCalls(), 1);
+  const nearby = await (
+    await fetch(`${baseUrl}/v1/aircraft/nearby?latitude=28.5&longitude=-81.6&radiusMiles=4`)
+  ).json();
+  assert.equal(nearby.flightAware.showSpend, false);
+  assert.equal(nearby.flightAware.state, "ok", "no warning state without a warning amount");
+
+  const overLimit = await flightAwareServer(context, {}, { totalCost: 10.01 });
+  const limited = await overLimit.lookup("AAL100");
+  assert.equal(overLimit.billedCalls(), 0);
+  assert.equal(limited.source, undefined);
 });
