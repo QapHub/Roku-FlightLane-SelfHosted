@@ -118,6 +118,10 @@ sub OnSettingsResult(event as object)
             longitude: NumberOr(saved.longitude, 0)
             radiusMiles: ClampSettingsRadius(NumberOr(saved.radiusMiles, 4))
             idleMinutes: 0
+            showFlyoverCount: saved.showFlyoverCount
+            trailMinutes: saved.trailMinutes
+            pollSeconds: saved.pollSeconds
+            colorByAltitude: saved.colorByAltitude
         }
         BuildContent()
         m.settingsList.SetFocus(true)
@@ -231,13 +235,7 @@ sub OnGeocodeResult(event as object)
 end sub
 
 sub AdjustRadius(direction as integer)
-    radius = m.pendingSettings.radiusMiles + direction
-    if radius < 1
-        radius = 10
-    else if radius > 10
-        radius = 1
-    end if
-    m.pendingSettings.radiusMiles = radius
+    m.pendingSettings.radiusMiles = StepRadius(m.pendingSettings.radiusMiles, direction, true)
     BuildContent()
     m.settingsList.jumpToItem = 1
 end sub
@@ -246,8 +244,8 @@ function ClampSettingsRadius(value as float) as float
     if value < 1
         return 1
     end if
-    if value > 10
-        return 10
+    if value > MaxRadiusMiles()
+        return MaxRadiusMiles()
     end if
     return Int(value)
 end function

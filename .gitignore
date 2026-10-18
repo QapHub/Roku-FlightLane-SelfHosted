@@ -12,6 +12,7 @@ coverage/
 source/config.generated.brs
 images/radar-bg.png
 images/map-backdrop.jpg
+images/aircraft-*.png
 
 *.pkg
 *.zip

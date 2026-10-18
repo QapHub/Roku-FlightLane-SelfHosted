@@ -1,19 +1,17 @@
 # Security
 
-## Provider credentials
+## Provider data
 
-Store provider keys only in `.env.local`. That file is ignored by Git. The build writes only the local service URL to `source/config.generated.brs`, and that generated file is ignored as well.
+By default Flight Lane uses only free providers that need no keys. The one optional credential is `FLIGHTAWARE_API_KEY`, which is billed per query: keep it only in `.env.local` (ignored by Git), never paste it into issues or screenshots, and rotate it in the AeroAPI portal if it is disclosed. Keep `.env.local` out of Git in any case; it also holds your network addresses. The build writes only the local service URL to `source/config.generated.brs`, and that generated file is ignored as well.
 
 Before sharing a ZIP or commit, run:
 
-```powershell
+```sh
 npm run check
 git status --short
 ```
 
-The validation task inspects the Roku package for provider hostnames, header names, and environment-variable markers that belong only on the local computer.
-
-Restrict each provider key to the smallest set of APIs possible and enable usage alerts. Rotate a key immediately if it is committed, pasted into an issue, included in a screenshot, or otherwise disclosed.
+The validation task inspects the Roku package for provider hostnames that belong only on the local computer, so the Roku always talks to your local service rather than to providers directly.
 
 ## Local network boundary
 
@@ -27,7 +25,7 @@ The service defaults to `LOCAL_NETWORK_ONLY=true` and rejects source addresses o
 
 ## Roku developer password
 
-The deployment script prompts for the Roku developer password using a secure PowerShell prompt. It never reads the password from `.env.local` or saves it. Do not add a password variable to the environment file.
+The deployment script prompts for the Roku developer password without echoing it to the terminal and passes it to `curl` on standard input, so it never appears in the process list. It never saves the password.
 
 ## Reporting a vulnerability
 

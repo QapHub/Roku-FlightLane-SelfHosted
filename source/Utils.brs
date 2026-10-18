@@ -2,6 +2,11 @@ function IsNonEmptyString(value as dynamic) as boolean
     valueType = Type(value)
     return (valueType = "roString" or valueType = "String") and value.Trim() <> ""
 end function
+function IsTrue(value as dynamic) as boolean
+    valueType = Type(value)
+    return (valueType = "roBoolean" or valueType = "Boolean") and value
+end function
+
 function IsNumericValue(value as dynamic) as boolean
     valueType = Type(value)
     return valueType = "roInt" or valueType = "Integer" or valueType = "roFloat" or valueType = "Float" or valueType = "roDouble" or valueType = "Double" or valueType = "roLongInteger" or valueType = "LongInteger"
@@ -76,6 +81,15 @@ function UrlEncode(value as dynamic) as string
     return transfer.Escape(value.ToStr())
 end function
 
+' Whole amounts drop the cents: $10, $5.40.
+function FormatDollars(value as dynamic) as string
+    cents = Int((NumberOr(value, 0) * 100) + 0.5)
+    if cents mod 100 = 0
+        return "$" + Int(cents / 100).ToStr()
+    end if
+    return "$" + Int(cents / 100).ToStr() + "." + PadTwo(cents mod 100)
+end function
+
 function PadTwo(value as integer) as string
     if value < 10
         return "0" + value.ToStr()
@@ -91,4 +105,165 @@ function LocalClock(epochSeconds as dynamic) as string
     clock.FromSeconds(Int(epochSeconds))
     clock.ToLocalTime()
     return PadTwo(clock.GetHours()) + ":" + PadTwo(clock.GetMinutes())
+end function
+
+' BrightScript has only Atn(), so this provides the two-argument arctangent in radians.
+function Atan2(y as float, x as float) as float
+    pi = 3.14159265358979
+    if x > 0
+        return Atn(y / x)
+    else if x < 0 and y >= 0
+        return Atn(y / x) + pi
+    else if x < 0
+        return Atn(y / x) - pi
+    else if y > 0
+        return pi / 2
+    else if y < 0
+        return -pi / 2
+    end if
+    return 0
+end function
+
+' Wraps an angle in degrees into -180..180.
+function WrapDegrees(value as float) as float
+    wrapped = value
+    while wrapped > 180
+        wrapped = wrapped - 360
+    end while
+    while wrapped < -180
+        wrapped = wrapped + 360
+    end while
+    return wrapped
+end function
+
+' Moves an aircraft forward along a constant-rate turn (degrees per second, positive = right),
+' then straight. When the autopilot-selected heading (navHeading, or -1) lies ahead in the
+' turn, the turn stops there. Turns are capped at 180 degrees.
+function AdvancePosition(eastMiles as float, northMiles as float, heading as float, speedKnots as float, turnRate as float, navHeading as float, seconds as float) as object
+    speedMilesPerSecond = speedKnots * 1.150779 / 3600
+    radiansPerDegree = 3.14159265358979 / 180
+    east = eastMiles
+    north = northMiles
+    currentHeading = heading
+    remaining = seconds
+
+    if Abs(turnRate) >= 0.05 and remaining > 0
+        turnSeconds = remaining
+        if Abs(180 / turnRate) < turnSeconds
+            turnSeconds = Abs(180 / turnRate)
+        end if
+        if navHeading >= 0
+            toTarget = WrapDegrees(navHeading - heading)
+            if toTarget * turnRate > 0 and toTarget / turnRate < turnSeconds
+                turnSeconds = toTarget / turnRate
+            end if
+        end if
+        rate = turnRate * radiansPerDegree
+        startRadians = heading * radiansPerDegree
+        endRadians = startRadians + (rate * turnSeconds)
+        east = east + ((speedMilesPerSecond / rate) * (Cos(startRadians) - Cos(endRadians)))
+        north = north + ((speedMilesPerSecond / rate) * (Sin(endRadians) - Sin(startRadians)))
+        currentHeading = heading + (turnRate * turnSeconds)
+        remaining = remaining - turnSeconds
+    end if
+
+    if remaining > 0
+        headingRadians = currentHeading * radiansPerDegree
+        east = east + (speedMilesPerSecond * remaining * Sin(headingRadians))
+        north = north + (speedMilesPerSecond * remaining * Cos(headingRadians))
+    end if
+    return { eastMiles: east, northMiles: north, heading: currentHeading }
+end function
+
+' Trail length choices in minutes (0 = off) and provider polling choices in seconds.
+function TrailMinuteOptions() as object
+    return [0, 1, 2, 5]
+end function
+
+function PollSecondOptions() as object
+    return [2, 5, 10, 15, 30, 60]
+end function
+
+' Cycles to the next or previous value in options, wrapping around.
+function StepOption(options as object, current as float, direction as integer) as float
+    index = 0
+    for optionIndex = 0 to options.Count() - 1
+        if options[optionIndex] = current
+            index = optionIndex
+        end if
+    end for
+    index = index + direction
+    if index < 0
+        index = options.Count() - 1
+    else if index >= options.Count()
+        index = 0
+    end if
+    return options[index]
+end function
+
+' Radius choices in settings: 1-mile steps to 10, then 15, 20, and 25 (the maximum).
+function RadiusOptions() as object
+    return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25]
+end function
+
+function MaxRadiusMiles() as float
+    return 25
+end function
+
+' Moves to the next or previous radius option; wraps around when wrap is true.
+function StepRadius(current as float, direction as integer, wrap as boolean) as float
+    options = RadiusOptions()
+    index = 0
+    for optionIndex = 0 to options.Count() - 1
+        if options[optionIndex] <= current
+            index = optionIndex
+        end if
+    end for
+    index = index + direction
+    if index < 0
+        if wrap
+            index = options.Count() - 1
+        else
+            index = 0
+        end if
+    else if index >= options.Count()
+        if wrap
+            index = 0
+        else
+            index = options.Count() - 1
+        end if
+    end if
+    return options[index]
+end function
+
+' Altitude color bands as 0xRRGGBB, without alpha. They avoid yellow, which is reserved for the
+' selected aircraft (SelectedAircraftColor).
+function AltitudeBands() as object
+    return [
+        { label: "GND", maxFt: 0, color: "0x94A3B8" }
+        { label: "<1k", maxFt: 1000, color: "0xEF4444" }
+        { label: "3k", maxFt: 3000, color: "0xFB923C" }
+        { label: "6k", maxFt: 6000, color: "0x4ADE80" }
+        { label: "10k", maxFt: 10000, color: "0x2DD4BF" }
+        { label: "20k", maxFt: 20000, color: "0x38BDF8" }
+        { label: "30k", maxFt: 30000, color: "0x818CF8" }
+        { label: "30k+", maxFt: 999999, color: "0xD946EF" }
+    ]
+end function
+
+function AltitudeColor(altitudeFt as float, onGround as boolean) as string
+    bands = AltitudeBands()
+    if onGround or altitudeFt < 0
+        return bands[0].color
+    end if
+    for index = 1 to bands.Count() - 1
+        if altitudeFt < bands[index].maxFt
+            return bands[index].color
+        end if
+    end for
+    return bands[bands.Count() - 1].color
+end function
+
+function SelectedAircraftColor() as string
+    return "0xFDE047"
 end function

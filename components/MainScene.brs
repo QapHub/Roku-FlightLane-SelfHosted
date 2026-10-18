@@ -2,6 +2,11 @@ sub init()
     m.config = GetAppConfig()
     appInfo = CreateObject("roAppInfo")
     m.isScreensaver = appInfo.GetValue("screensaver_title") <> ""
+    versionText = "v" + appInfo.GetVersion()
+    if IsNonEmptyString(m.config.buildId)
+        versionText = versionText + " · " + m.config.buildId
+    end if
+    m.top.FindNode("versionLabel").text = versionText
     m.appTitle = m.top.FindNode("appTitle")
     m.subtitle = m.top.FindNode("subtitle")
     m.statusLabel = m.top.FindNode("statusLabel")
@@ -19,8 +24,7 @@ sub init()
     m.closeupPip = m.top.FindNode("closeupPip")
     m.closeupPipTitle = m.top.FindNode("closeupPipTitle")
     m.closeupSatelliteMaps = [m.top.FindNode("closeupSatelliteMapA"), m.top.FindNode("closeupSatelliteMapB")]
-    m.closeupAttributions = [m.top.FindNode("closeupAttributionA"), m.top.FindNode("closeupAttributionB")]
-    m.closeupAttributionClips = [m.top.FindNode("closeupAttributionClipA"), m.top.FindNode("closeupAttributionClipB")]
+    m.closeupImageryCredit = m.top.FindNode("closeupImageryCredit")
     m.closeupMapActiveIndex = 0
     m.closeupMapPendingIndex = -1
     m.closeupMapStates = [
@@ -29,9 +33,13 @@ sub init()
     ]
     m.closeupMarkerLayer = m.top.FindNode("closeupMarkerLayer")
     m.rangeLabel = m.top.FindNode("rangeLabel")
+    m.dataSourceLabel = m.top.FindNode("dataSourceLabel")
+    m.spendNoticeLabel = m.top.FindNode("spendNoticeLabel")
+    m.flightAwareDailyPercent = invalid
     m.aircraftList = m.top.FindNode("aircraftList")
     m.emptyLabel = m.top.FindNode("emptyLabel")
     m.flyoverCountLabel = m.top.FindNode("flyoverCountLabel")
+    m.flyoverCountCaption = m.top.FindNode("flyoverCountCaption")
     m.selectedTitle = m.top.FindNode("selectedTitle")
     m.selectedMeta = m.top.FindNode("selectedMeta")
     m.airlineBadgeBackground = m.top.FindNode("airlineBadgeBackground")
@@ -53,6 +61,8 @@ sub init()
     m.footerControls = m.top.FindNode("footerControls")
     m.footerSettingsControls = m.top.FindNode("footerSettingsControls")
     m.footerLabel = m.top.FindNode("footerLabel")
+    ApplyCompactFonts()
+    BuildAltitudeLegend()
     m.refreshTimer = m.top.FindNode("refreshTimer")
     m.motionTimer = m.top.FindNode("motionTimer")
     m.clockTimer = m.top.FindNode("clockTimer")
@@ -67,12 +77,12 @@ sub init()
     m.appTitle.text = m.config.appName
     m.subtitle.text = "LIVE AIRCRAFT WITHIN " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MILES OF HOME"
     if false
-        m.rangeLabel.text = "SATELLITE  •  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI RADIUS"
+        m.rangeLabel.text = "Satellite · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi radius"
         m.satelliteRemoteRequested = true
         mapUrl = SatelliteMapUrl(m.config.homeLatitude, m.config.homeLongitude, m.config.mapZoom)
         m.satelliteMap.uri = mapUrl
     else
-        m.rangeLabel.text = "RANGE  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI"
+        m.rangeLabel.text = "Range · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi"
     end if
     m.aircraft = []
     m.selectedIndex = 0
@@ -179,8 +189,6 @@ sub ReleaseOptionalVisualCaches()
     for mapIndex = 0 to m.closeupSatelliteMaps.Count() - 1
         m.closeupSatelliteMaps[mapIndex].uri = ""
         m.closeupSatelliteMaps[mapIndex].visible = false
-        m.closeupAttributions[mapIndex].uri = ""
-        m.closeupAttributionClips[mapIndex].visible = false
         m.closeupMapStates[mapIndex] = {
             url: ""
             centerEastMiles: invalid
@@ -352,9 +360,6 @@ sub ConfigureMapAuthorization()
     for each mapPoster in m.closeupSatelliteMaps
         mapPoster.SetHeaders(headers)
     end for
-    for each attributionPoster in m.closeupAttributions
-        attributionPoster.SetHeaders(headers)
-    end for
 end sub
 
 sub StartDeviceRegistration()
@@ -487,7 +492,7 @@ sub HandleGeocodeResult(result as object)
 
     data = result.data
     if m.pendingSettings = invalid
-        defaultRadius = ClampNumber(m.config.radiusMiles, 1, 10)
+        defaultRadius = ClampNumber(m.config.radiusMiles, 1, MaxRadiusMiles())
         m.pendingSettings = {
             address: data.address
             latitude: data.latitude
@@ -516,10 +521,15 @@ sub ApplyRuntimeSettings(settings as object)
         return
     end if
 
-    radiusMiles = ClampNumber(NumberOr(settings.radiusMiles, 4), 1, 10)
+    radiusMiles = ClampNumber(NumberOr(settings.radiusMiles, 4), 1, MaxRadiusMiles())
     idleMinutes = NumberOr(settings.idleMinutes, 10)
     if idleMinutes < 0
         idleMinutes = 0
+    end if
+    ' Saved choice wins; otherwise SHOW_FLYOVER_COUNT from the build (default on).
+    showFlyoverCount = m.config.showFlyoverCount <> false
+    if Type(settings.showFlyoverCount) = "roBoolean" or Type(settings.showFlyoverCount) = "Boolean"
+        showFlyoverCount = settings.showFlyoverCount
     end if
     m.settings = {
         address: StringOr(settings.address, "Saved home location")
@@ -527,7 +537,16 @@ sub ApplyRuntimeSettings(settings as object)
         longitude: NumberOr(settings.longitude, 0)
         radiusMiles: radiusMiles
         idleMinutes: idleMinutes
+        showFlyoverCount: showFlyoverCount
+        colorByAltitude: SettingBoolean(settings.colorByAltitude, IsTrue(m.config.colorByAltitude))
+        trailMinutes: NumberOr(settings.trailMinutes, NumberOr(m.config.trailMinutes, 5))
+        pollSeconds: NumberOr(settings.pollSeconds, NumberOr(m.config.pollSeconds, 5))
     }
+    m.flyoverCountCaption.visible = showFlyoverCount
+    m.flyoverCountLabel.visible = showFlyoverCount
+    if m.altitudeLegend <> invalid
+        m.altitudeLegend.visible = m.settings.colorByAltitude
+    end if
     m.pendingSettings = invalid
     m.firstLaunchSetup = false
     m.settingsOpen = false
@@ -626,7 +645,33 @@ function CloneSettings(settings as object) as object
         longitude: settings.longitude
         radiusMiles: settings.radiusMiles
         idleMinutes: settings.idleMinutes
+        showFlyoverCount: settings.showFlyoverCount
+        trailMinutes: settings.trailMinutes
+        pollSeconds: settings.pollSeconds
+        colorByAltitude: settings.colorByAltitude
     }
+end function
+
+function TrailLabel(minutes as dynamic) as string
+    value = NumberOr(minutes, 0)
+    if value <= 0
+        return "Off"
+    end if
+    return FormatSettingNumber(value) + " min"
+end function
+
+function SettingBoolean(value as dynamic, fallback as boolean) as boolean
+    if Type(value) = "roBoolean" or Type(value) = "Boolean"
+        return value
+    end if
+    return fallback
+end function
+
+function OnOffLabel(value as dynamic) as string
+    if IsTrue(value)
+        return "On"
+    end if
+    return "Off"
 end function
 
 function FormatSettingNumber(value as float) as string
@@ -670,6 +715,10 @@ sub BuildSettingsContent()
         "Change home address"
         "Detection radius: " + FormatSettingNumber(m.pendingSettings.radiusMiles) + " miles"
         "Idle display mode: " + idleLabel
+        "24-hour flyover count: " + OnOffLabel(m.pendingSettings.showFlyoverCount)
+        "Aircraft trails: " + TrailLabel(m.pendingSettings.trailMinutes)
+        "Provider polling: every " + FormatSettingNumber(m.pendingSettings.pollSeconds) + " s"
+        "Color by altitude: " + OnOffLabel(m.pendingSettings.colorByAltitude)
         "Save and close"
     ]
     content = CreateObject("roSGNode", "ContentNode")
@@ -694,7 +743,9 @@ sub ActivateSettingsRow(index as integer)
         AdjustSettingsValue(1)
     else if index = 2
         AdjustSettingsValue(1)
-    else if index = 3
+    else if index >= 3 and index <= 6
+        AdjustSettingsValue(1)
+    else if index = 7
         m.statusLabel.text = "SAVING SETTINGS..."
         SaveRuntimeSettings(m.pendingSettings)
     end if
@@ -703,7 +754,7 @@ end sub
 sub AdjustSettingsValue(direction as integer)
     index = m.settingsList.itemFocused
     if index = 1
-        m.pendingSettings.radiusMiles = ClampNumber(m.pendingSettings.radiusMiles + direction, 1, 10)
+        m.pendingSettings.radiusMiles = StepRadius(m.pendingSettings.radiusMiles, direction, false)
     else if index = 2
         idleOptions = [0, 1, 5, 10, 15, 30, 60]
         selectedOption = 0
@@ -720,6 +771,14 @@ sub AdjustSettingsValue(direction as integer)
             selectedOption = 0
         end if
         m.pendingSettings.idleMinutes = idleOptions[selectedOption]
+    else if index = 3
+        m.pendingSettings.showFlyoverCount = m.pendingSettings.showFlyoverCount <> true
+    else if index = 4
+        m.pendingSettings.trailMinutes = StepOption(TrailMinuteOptions(), m.pendingSettings.trailMinutes, direction)
+    else if index = 5
+        m.pendingSettings.pollSeconds = StepOption(PollSecondOptions(), m.pendingSettings.pollSeconds, direction)
+    else if index = 6
+        m.pendingSettings.colorByAltitude = m.pendingSettings.colorByAltitude <> true
     else
         return
     end if
@@ -805,9 +864,9 @@ sub EnsureOverviewMap()
             m.satelliteRemoteRequested = true
             m.satelliteMap.uri = mapUrl
         end if
-        m.rangeLabel.text = "SATELLITE  •  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI FROM HOME"
+        m.rangeLabel.text = "Satellite · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi from home"
     else
-        m.rangeLabel.text = "RANGE  •  " + RoundTo(m.config.radiusMiles, 1).ToStr() + " MI FROM HOME"
+        m.rangeLabel.text = "Range · " + RoundTo(m.config.radiusMiles, 1).ToStr() + " mi from home"
     end if
 end sub
 
@@ -820,16 +879,16 @@ sub UpdateCloseupPip(aircraft as object)
     leadSeconds = m.config.refreshSeconds / 2
     mapCenterPosition = ProjectPosition(currentPosition, aircraft.heading, aircraft.speedKnots, leadSeconds)
     mapSettings = CloseupMapSettings(aircraft, mapCenterPosition)
+    mapCenterPosition = SnapMapCenter(mapCenterPosition, mapSettings.snapMiles)
     m.closeupPip.visible = true
-    m.closeupPipTitle.text = aircraft.callsign + "  •  1,000 FT  •  Z" + mapSettings.zoom.ToStr()
+    m.closeupPipTitle.text = aircraft.callsign + " · 1,000 ft · Z" + mapSettings.zoom.ToStr()
 
     if m.config.satelliteMapEnabled
         centerCoordinates = CoordinatesFromHomeOffset(mapCenterPosition.eastMiles, mapCenterPosition.northMiles)
         mapUrl = SatelliteMapUrl(centerCoordinates.latitude, centerCoordinates.longitude, mapSettings.zoom)
         QueueCloseupMap(mapUrl, mapSettings.displaySize, mapCenterPosition, aircraft.callsign, mapSettings.zoom)
     else
-        m.closeupAttributionClips[0].visible = false
-        m.closeupAttributionClips[1].visible = false
+        m.closeupImageryCredit.visible = false
     end if
     DrawCloseupPip()
 end sub
@@ -858,8 +917,6 @@ sub QueueCloseupMap(mapUrl as string, displaySize as float, mapCenterPosition as
     pendingMap.width = displaySize
     pendingMap.height = displaySize
     pendingMap.translation = [baseOffset, baseOffset]
-    m.closeupAttributionClips[pendingIndex].visible = false
-    m.closeupAttributions[pendingIndex].uri = mapUrl
     print "Flight Lane debug: PIP preloading="; callsign; " radius="; m.config.closeupRadiusFeet; "ft zoom="; zoom; " smooth=0.2s"
     pendingMap.uri = mapUrl
 end sub
@@ -872,19 +929,37 @@ function CloseupMapSettings(aircraft as object, mapCenterPosition as object) as 
     latitudeRadians = centerCoordinates.latitude * 3.14159265358979 / 180
     selectedZoom = 0
     metersPerLogicalPixel = 156543.03392 * Cos(latitudeRadians)
+    ' The map center snaps to a grid of 1/4 the half-span, so reserve that much slack.
+    ' Repeated refreshes then reuse one map URL instead of requesting a new provider image.
+    snapFraction = 0.25
     for candidateZoom = m.config.closeupMaxZoom to 0 step -1
         candidateMetersPerLogicalPixel = 156543.03392 * Cos(latitudeRadians) / (2 ^ candidateZoom)
         availableHalfSpanFeet = candidateMetersPerLogicalPixel * 320 / 0.3048
-        if availableHalfSpanFeet >= requiredHalfSpanFeet
+        if availableHalfSpanFeet * (1 - (snapFraction / 2) - 0.02) >= requiredHalfSpanFeet
             selectedZoom = candidateZoom
             metersPerLogicalPixel = candidateMetersPerLogicalPixel
             exit for
         end if
     end for
 
+    ' Size the grid from the home latitude so it stays fixed while the aircraft moves.
+    homeLatitudeRadians = m.config.homeLatitude * 3.14159265358979 / 180
+    homeHalfSpanFeet = 156543.03392 * Cos(homeLatitudeRadians) / (2 ^ selectedZoom) * 320 / 0.3048
+    snapMiles = homeHalfSpanFeet * snapFraction / 5280
+
     nativePixelsPerFoot = (0.3048 / metersPerLogicalPixel) * (m.config.closeupViewportSize / 640)
     displaySize = m.config.closeupViewportSize * (m.config.closeupRadarPixelsPerFoot / nativePixelsPerFoot)
-    return { zoom: selectedZoom, displaySize: displaySize }
+    return { zoom: selectedZoom, displaySize: displaySize, snapMiles: snapMiles }
+end function
+
+function SnapMapCenter(position as object, snapMiles as float) as object
+    if snapMiles <= 0
+        return position
+    end if
+    return {
+        eastMiles: Int((position.eastMiles / snapMiles) + 0.5) * snapMiles
+        northMiles: Int((position.northMiles / snapMiles) + 0.5) * snapMiles
+    }
 end function
 
 function ProjectPosition(position as object, heading as float, speedKnots as float, secondsAhead as float) as object
@@ -908,7 +983,7 @@ sub OnSatelliteLoadStatus(event as object)
     if event.GetData() = "failed" and m.satelliteRemoteRequested
         m.satelliteRemoteRequested = false
         m.satelliteMap.uri = "pkg:/images/map-backdrop.jpg"
-        m.rangeLabel.text = "RADAR  •  SATELLITE MAP UNAVAILABLE"
+        m.rangeLabel.text = "Radar · satellite map unavailable"
     end if
 end sub
 
@@ -932,15 +1007,13 @@ sub HandleCloseupSatelliteLoadStatus(mapIndex as integer, loadStatus as string)
     if loadStatus = "ready"
         oldIndex = m.closeupMapActiveIndex
         m.closeupSatelliteMaps[oldIndex].visible = false
-        m.closeupAttributionClips[oldIndex].visible = false
         m.closeupMapActiveIndex = mapIndex
         m.closeupMapPendingIndex = -1
         m.closeupSatelliteMaps[mapIndex].visible = true
-        m.closeupAttributionClips[mapIndex].visible = true
+        m.closeupImageryCredit.visible = true
         PositionCloseupPip()
     else if loadStatus = "failed"
         m.closeupSatelliteMaps[mapIndex].visible = false
-        m.closeupAttributionClips[mapIndex].visible = false
         m.closeupMapPendingIndex = -1
     end if
 end sub
@@ -1078,6 +1151,7 @@ sub RefreshNearbyAircraft()
         homeLatitude: m.config.homeLatitude
         homeLongitude: m.config.homeLongitude
         radiusMiles: m.config.radiusMiles
+        pollSeconds: m.settings.pollSeconds
         requestRevision: m.locationRevision
     })
 end sub
@@ -1138,12 +1212,172 @@ sub OnApiResult(event as object)
     end if
 end sub
 
+sub ShowDataSources(aircraftSource as string)
+    parts = []
+    if aircraftSource <> ""
+        parts.Push("Data: " + aircraftSource)
+    end if
+    if m.config.satelliteMapEnabled
+        parts.Push("Imagery: USGS")
+    end if
+    text = ""
+    for each part in parts
+        if text <> ""
+            text = text + " · "
+        end if
+        text = text + part
+    end for
+    m.dataSourceLabel.text = text
+end sub
+
+' Shows this month's FlightAware AeroAPI spend when the local service has a FlightAware key.
+sub ShowFlightAwareSpendNotice(spend as dynamic)
+    if Type(spend) <> "roAssociativeArray"
+        m.flightAwareDailyPercent = invalid
+        m.spendNoticeLabel.visible = false
+        return
+    end if
+
+    if IsNumericValue(spend.dailyPercent)
+        m.flightAwareDailyPercent = Int(spend.dailyPercent)
+    end if
+    ' Spending appears only when FLIGHTAWARE_API_SPEND_WARNING is set; the limit applies either way.
+    if not IsTrue(spend.showSpend)
+        m.spendNoticeLabel.visible = false
+        return
+    end if
+    state = StringOr(spend.state, "")
+    cost = FormatDollars(spend.monthToDateCost)
+    limit = FormatDollars(spend.limit)
+    prefix = FlightAwareLabel() + " API: "
+    if state = "limit"
+        m.spendNoticeLabel.text = prefix + cost + " of " + limit + " · paused"
+        m.spendNoticeLabel.color = "0xFCA5A5FF"
+    else if state = "warning"
+        m.spendNoticeLabel.text = prefix + cost + " of " + limit
+        m.spendNoticeLabel.color = "0xFBBF24FF"
+    else if state = "unavailable"
+        m.spendNoticeLabel.text = prefix + "usage unknown · paused"
+        m.spendNoticeLabel.color = "0xFBBF24FF"
+    else if state = "checking"
+        m.spendNoticeLabel.text = prefix + "checking usage…"
+        m.spendNoticeLabel.color = "0x8DA8C2FF"
+    else
+        m.spendNoticeLabel.text = prefix + cost + " of " + limit
+        m.spendNoticeLabel.color = "0x8DA8C2FF"
+    end if
+    m.spendNoticeLabel.visible = true
+end sub
+
+' "FlightAware (12%)": the share of FLIGHTAWARE_DAILY_LIMIT used today, when known.
+function FlightAwareLabel() as string
+    if m.flightAwareDailyPercent = invalid
+        return "FlightAware"
+    end if
+    return "FlightAware (" + m.flightAwareDailyPercent.ToStr() + "%)"
+end function
+
+function SourceLabel(source as dynamic) as string
+    text = StringOr(source, "")
+    if text = "FlightAware"
+        return FlightAwareLabel()
+    end if
+    return text
+end function
+
+' Built-in Roku fonts bottom out around 27px at 1080p, which truncates longer lines.
+' Shrink the system font on labels that carry variable-length text.
+' Color key for the altitude bands, in the radar panel just above the range line.
+sub BuildAltitudeLegend()
+    panel = m.top.FindNode("mainPanel")
+    if panel = invalid
+        return
+    end if
+    legend = panel.CreateChild("Group")
+    legend.translation = [70, 906]
+    legend.visible = false
+    m.altitudeLegend = legend
+    x = 0
+    for each band in AltitudeBands()
+        chip = legend.CreateChild("Rectangle")
+        chip.width = 12
+        chip.height = 12
+        chip.translation = [x, 6]
+        chip.color = band.color + "FF"
+        label = legend.CreateChild("Label")
+        label.translation = [x + 16, 0]
+        label.width = 50
+        label.height = 24
+        label.text = band.label
+        label.color = "0xBED3E6FF"
+        label.vertAlign = "center"
+        label.font = "font:SmallestSystemFont"
+        label.font.size = 16
+        x = x + 30 + (band.label.Len() * 9)
+    end for
+    chip = legend.CreateChild("Rectangle")
+    chip.width = 12
+    chip.height = 12
+    chip.translation = [x + 8, 6]
+    chip.color = SelectedAircraftColor() + "FF"
+    selectedLabel = legend.CreateChild("Label")
+    selectedLabel.translation = [x + 24, 0]
+    selectedLabel.width = 80
+    selectedLabel.height = 24
+    selectedLabel.text = "selected"
+    selectedLabel.color = "0xBED3E6FF"
+    selectedLabel.vertAlign = "center"
+    selectedLabel.font = "font:SmallestSystemFont"
+    selectedLabel.font.size = 16
+end sub
+
+sub ApplyCompactFonts()
+    sizes = {
+        statusLabel: 26
+        aircraftList: 26
+        closeupPipTitle: 24
+        airlineNameValue: 26
+        selectedMeta: 22
+        phaseValue: 30
+        projectionValue: 28
+        routeValue: 28
+        flightStatusValue: 22
+        departureValue: 22
+        arrivalValue: 22
+        spendNoticeLabel: 22
+        rangeLabel: 22
+        dataSourceLabel: 22
+        closeupImageryCredit: 20
+        aircraftPhotoAttribution: 20
+        versionLabel: 16
+    }
+    for each id in sizes
+        node = m.top.FindNode(id)
+        if node <> invalid
+            SetFontSize(node, "font", sizes[id])
+            if node.HasField("focusedFont")
+                SetFontSize(node, "focusedFont", sizes[id])
+            end if
+        end if
+    end for
+end sub
+
+sub SetFontSize(node as object, field as string, size as integer)
+    font = node.GetField(field)
+    if Type(font) = "roSGNode"
+        font.size = size
+    end if
+end sub
+
 sub HandleNearbyResult(result as object)
     if result.ok <> true
         m.statusLabel.text = "DATA ERROR — " + result.errorMessage
         m.statusLabel.color = "0xFCA5A5FF"
         return
     end if
+
+    ShowDataSources(StringOr(result.data.source, ""))
+    ShowFlightAwareSpendNotice(result.data.flightAware)
 
     counterAircraft = result.data.counterAircraft
     if counterAircraft = invalid
@@ -1303,7 +1537,7 @@ function CurrentEpochSeconds() as longinteger
 end function
 
 function AircraftListTitle(aircraft as object) as string
-    return aircraft.callsign + "   " + RoundTo(aircraft.distanceMiles, 1).ToStr() + " mi   " + FormatAltitude(aircraft.altitudeFt, aircraft.onGround)
+    return aircraft.callsign + "  " + RoundTo(aircraft.distanceMiles, 1).ToStr() + " mi  " + FormatAltitude(aircraft.altitudeFt, aircraft.onGround)
 end function
 
 sub OnAircraftFocused(event as object)
@@ -1340,7 +1574,7 @@ sub UpdateSelection()
     if aircraft.registration = "" and aircraft.aircraftType = ""
         metaParts.Push("ICAO " + UCase(aircraft.id))
     end if
-    m.selectedMeta.text = JoinText(metaParts, "  •  ")
+    m.selectedMeta.text = JoinText(metaParts, " · ")
     m.speedValue.text = FormatSpeed(aircraft.speedKnots)
     m.headingValue.text = CompassDirection(aircraft.heading) + "  " + FormatWhole(aircraft.heading) + "°"
     m.phaseValue.text = aircraft.phase + VerticalRateLabel(aircraft.verticalRateFpm)
@@ -1508,14 +1742,14 @@ sub ApplyCachedFlightDetails(aircraft as object)
 
     if m.config.flightLaneApiUrl = "" or m.localToken = ""
         m.routeValue.text = "Route details unavailable"
-        m.flightStatusValue.text = "Flight Lane secure connection is required"
+        m.flightStatusValue.text = "Local service connection required"
         m.departureValue.text = ""
         m.arrivalValue.text = ""
         return
     end if
 
-    m.routeValue.text = "Looking up origin and destination…"
-    m.flightStatusValue.text = "Flight details are cached for this session."
+    m.routeValue.text = "Looking up route…"
+    m.flightStatusValue.text = ""
     m.departureValue.text = ""
     m.arrivalValue.text = ""
     RequestSelectedFlightDetails()
@@ -1567,11 +1801,11 @@ end sub
 
 sub ShowFlightDetails(details as object)
     if details.available <> true
-        m.routeValue.text = "Route unavailable for this aircraft"
+        m.routeValue.text = "Route unavailable"
         if IsNonEmptyString(details.errorMessage)
             m.flightStatusValue.text = details.errorMessage
         else
-            m.flightStatusValue.text = "Private, unscheduled, or unmatched flight"
+            m.flightStatusValue.text = "Private or unmatched flight"
         end if
         m.departureValue.text = ""
         m.arrivalValue.text = ""
@@ -1581,13 +1815,29 @@ sub ShowFlightDetails(details as object)
     m.routeValue.text = details.origin + "  →  " + details.destination
     if details.status <> ""
         m.flightStatusValue.text = details.status
+        if IsNonEmptyString(details.source)
+            m.flightStatusValue.text = m.flightStatusValue.text + " · " + SourceLabel(details.source)
+        end if
     else
-        m.flightStatusValue.text = "FlightAware route match"
+        m.flightStatusValue.text = "Typical route"
+        if IsNonEmptyString(details.source)
+            m.flightStatusValue.text = m.flightStatusValue.text + " · " + SourceLabel(details.source)
+        end if
     end if
     departureTime = PreferredTime(details.actualOff, details.estimatedOff, details.scheduledOff)
     arrivalTime = PreferredTime(details.actualOn, details.estimatedOn, details.scheduledOn)
-    m.departureValue.text = TimeLine("Takeoff", departureTime)
-    m.arrivalValue.text = TimeLine("Landing", arrivalTime)
+    ' Show only the times that are known, without leaving a gap.
+    lines = []
+    if departureTime <> ""
+        lines.Push("Takeoff: " + departureTime)
+    end if
+    if arrivalTime <> ""
+        lines.Push("Landing: " + arrivalTime)
+    end if
+    lines.Push("")
+    lines.Push("")
+    m.departureValue.text = lines[0]
+    m.arrivalValue.text = lines[1]
 end sub
 
 function PreferredTime(actualValue as dynamic, estimatedValue as dynamic, scheduledValue as dynamic) as string
@@ -1603,18 +1853,37 @@ function PreferredTime(actualValue as dynamic, estimatedValue as dynamic, schedu
     return ""
 end function
 
+' Converts an ISO 8601 UTC time to the Roku's local time zone: "2:05 PM", or "Oct 14 2:05 PM"
+' when it falls on a different local day than today.
 function FriendlyTime(value as string) as string
-    if value.Len() >= 16
-        return Mid(value, 6, 5) + " " + Mid(value, 12, 5) + "Z"
+    if value.Len() < 16
+        return value
     end if
-    return value
-end function
+    moment = CreateObject("roDateTime")
+    moment.FromISO8601String(value)
+    if moment.AsSeconds() <= 0
+        return value
+    end if
+    moment.ToLocalTime()
+    today = CreateObject("roDateTime")
+    today.Mark()
+    today.ToLocalTime()
 
-function TimeLine(label as string, value as string) as string
-    if value = ""
-        return label + ": unavailable"
+    hours = moment.GetHours()
+    suffix = "AM"
+    if hours >= 12
+        suffix = "PM"
     end if
-    return label + ": " + value
+    displayHours = hours mod 12
+    if displayHours = 0
+        displayHours = 12
+    end if
+    text = displayHours.ToStr() + ":" + PadTwo(moment.GetMinutes()) + " " + suffix
+    if moment.GetDayOfMonth() <> today.GetDayOfMonth() or moment.GetMonth() <> today.GetMonth()
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        text = months[moment.GetMonth() - 1] + " " + moment.GetDayOfMonth().ToStr() + " " + text
+    end if
+    return text
 end function
 
 function VerticalRateLabel(rate as float) as string
@@ -1712,42 +1981,26 @@ sub DrawRadar()
     end if
 
     if maxMarkers > 0
+        trails = CreateObject("roSGNode", "Group")
+        m.markerLayer.AppendChild(trails)
         for index = 0 to maxMarkers - 1
             aircraft = m.aircraft[index]
             position = InterpolatedAircraftPosition(aircraft)
             selected = index = m.selectedIndex
+            DrawAircraftTrail(trails, aircraft, selected, center, scale)
+
             marker = CreateObject("roSGNode", "Group")
             marker.translation = [center + (position.eastMiles * scale), center - (position.northMiles * scale)]
+            path = DrawProjectedPath(marker, aircraft, position, selected, scale)
 
-            projectionDistance = DistanceToRadarEdge(position.eastMiles, position.northMiles, aircraft.heading, m.config.radiusMiles)
-            path = marker.CreateChild("Rectangle")
-            path.width = projectionDistance * scale
-            path.height = 3
-            path.translation = [0, -1]
-            path.scaleRotateCenter = [0, 1]
-            path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
-            path.visible = projectionDistance > 0
+            iconSize = 30
             if selected
-                path.color = "0xFBBF2488"
-            else
-                path.color = "0x38BDF855"
+                iconSize = 40
             end if
-
-            dot = marker.CreateChild("Rectangle")
-            if selected
-                dot.width = 22
-                dot.height = 22
-                dot.translation = [-11, -11]
-                dot.color = "0xFBBF24FF"
-            else
-                dot.width = 14
-                dot.height = 14
-                dot.translation = [-7, -7]
-                dot.color = "0x38BDF8FF"
-            end if
+            icon = AddAircraftIcon(marker, aircraft, NumberOr(position.heading, aircraft.heading), iconSize, selected)
 
             label = marker.CreateChild("Label")
-            label.translation = [16, -20]
+            label.translation = [iconSize / 2 + 4, -22]
             label.width = 190
             label.height = 40
             label.text = aircraft.callsign
@@ -1758,7 +2011,7 @@ sub DrawRadar()
             end if
 
             m.markerLayer.AppendChild(marker)
-            m.radarMarkers.Push({ group: marker, path: path, aircraftIndex: index })
+            m.radarMarkers.Push({ group: marker, path: path, icon: icon, aircraftIndex: index })
         end for
     end if
 
@@ -1799,15 +2052,11 @@ sub DrawCloseupPip()
     path.translation = [center, center - 2]
     path.scaleRotateCenter = [0, 2]
     path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
-    path.color = "0xFBBF24CC"
+    path.color = HighlightColor() + "CC"
 
     marker = CreateObject("roSGNode", "Group")
     marker.translation = [center, center]
-    dot = marker.CreateChild("Rectangle")
-    dot.width = 18
-    dot.height = 18
-    dot.translation = [-9, -9]
-    dot.color = "0xFBBF24FF"
+    icon = AddAircraftIcon(marker, aircraft, aircraft.heading, 34, true)
     m.closeupMarkerLayer.AppendChild(marker)
 
     home = CreateObject("roSGNode", "Group")
@@ -1828,11 +2077,171 @@ sub DrawCloseupPip()
     m.closeupMarkerRecord = {
         group: marker
         path: path
+        icon: icon
         home: home
         aircraftIndex: m.selectedIndex
     }
     PositionCloseupPip()
 end sub
+
+'
+' Draws where the aircraft actually flew: its earlier reported positions joined to the latest
+' report, fading with age. The selected aircraft shows the trail length chosen in settings;
+' others show at most the last 80 seconds of it.
+sub DrawAircraftTrail(parent as object, aircraft as object, selected as boolean, center as float, scale as float)
+    maxAgeSeconds = NumberOr(m.settings.trailMinutes, 5) * 60
+    if not selected and maxAgeSeconds > 80
+        maxAgeSeconds = 80
+    end if
+    if maxAgeSeconds <= 0 or Type(aircraft.trail) <> "roArray" or aircraft.trail.Count() = 0
+        return
+    end if
+    points = []
+    for each point in aircraft.trail
+        if NumberOr(point.ageSeconds, 0) <= maxAgeSeconds
+            points.Push(point)
+        end if
+    end for
+    if points.Count() = 0
+        return
+    end if
+    points.Push({ eastMiles: aircraft.eastMiles, northMiles: aircraft.northMiles, altitudeFt: aircraft.altitudeFt, onGround: aircraft.onGround })
+
+    ' With altitude coloring, each segment takes the color of its newer end.
+    segmentCount = points.Count() - 1
+    for index = 0 to segmentCount - 1
+        alpha = Int(40 + (150 * (index + 1) / segmentCount))
+        if ColorByAltitude()
+            alpha = Int(60 + (170 * (index + 1) / segmentCount))
+        end if
+        color = TrailColor(aircraft, points[index + 1], selected, alpha)
+        AddLineSegment(parent, center + (points[index].eastMiles * scale), center - (points[index].northMiles * scale), center + (points[index + 1].eastMiles * scale), center - (points[index + 1].northMiles * scale), color, 2)
+    end for
+end sub
+
+' Draws the projected path as a curve following the current turn: 90 seconds for the
+' selected aircraft, 60 for others, stopping at the radar edge. Coordinates are relative to
+' the marker so the path moves with it.
+function DrawProjectedPath(marker as object, aircraft as object, position as object, selected as boolean, scale as float) as object
+    path = marker.CreateChild("Group")
+    if aircraft.speedKnots <= 1
+        return path
+    end if
+    horizon = 60
+    color = PathColor(aircraft, selected)
+    thickness = 3
+    if selected
+        horizon = 90
+    end if
+    heading = NumberOr(position.heading, aircraft.heading)
+    previousX = 0.0
+    previousY = 0.0
+    for seconds = 10 to horizon step 10
+        ahead = AdvancePosition(position.eastMiles, position.northMiles, heading, aircraft.speedKnots, NumberOr(aircraft.turnRate, 0), NumberOr(aircraft.navHeading, -1), seconds)
+        if Sqr((ahead.eastMiles * ahead.eastMiles) + (ahead.northMiles * ahead.northMiles)) > m.config.radiusMiles
+            exit for
+        end if
+        x = (ahead.eastMiles - position.eastMiles) * scale
+        y = (position.northMiles - ahead.northMiles) * scale
+        AddLineSegment(path, previousX, previousY, x, y, color, thickness)
+        previousX = x
+        previousY = y
+    end for
+    return path
+end function
+
+' Adds a heading-rotated icon for the aircraft's class (airliner, light, military, rotorcraft,
+' ground), tinted by IconColor.
+function AddAircraftIcon(parent as object, aircraft as object, heading as float, size as integer, selected as boolean) as object
+    icon = parent.CreateChild("Poster")
+    icon.uri = "pkg:/images/aircraft-" + StringOr(aircraft.kind, "light") + ".png"
+    icon.width = size
+    icon.height = size
+    icon.translation = [-size / 2, -size / 2]
+    icon.scaleRotateCenter = [size / 2, size / 2]
+    icon.rotation = HeadingRotation(heading)
+    icon.blendColor = IconColor(aircraft, selected)
+    return icon
+end function
+
+' Aircraft colors. By default: blue, red for military, amber when selected. With "Color by
+' altitude" on: altitude bands, with yellow reserved for the selected aircraft.
+function ColorByAltitude() as boolean
+    return m.settings <> invalid and IsTrue(m.settings.colorByAltitude)
+end function
+
+function HighlightColor() as string
+    if ColorByAltitude()
+        return SelectedAircraftColor()
+    end if
+    return "0xFBBF24"
+end function
+
+function IconColor(aircraft as object, selected as boolean) as string
+    if selected
+        return HighlightColor() + "FF"
+    end if
+    if ColorByAltitude()
+        return AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "FF"
+    end if
+    if IsTrue(aircraft.military)
+        return "0xF87171FF"
+    end if
+    return "0x38BDF8FF"
+end function
+
+function TrailColor(aircraft as object, point as object, selected as boolean, alpha as integer) as string
+    if selected
+        return HighlightColor() + ByteHex(alpha)
+    end if
+    if ColorByAltitude()
+        return AltitudeColor(NumberOr(point.altitudeFt, 0), IsTrue(point.onGround)) + ByteHex(Int(alpha * 0.75))
+    end if
+    return "0x7DD3FC" + ByteHex(Int(alpha * 0.6))
+end function
+
+function PathColor(aircraft as object, selected as boolean) as string
+    if selected
+        return HighlightColor() + "AA"
+    end if
+    if ColorByAltitude()
+        return AltitudeColor(aircraft.altitudeFt, aircraft.onGround) + "77"
+    end if
+    return "0x38BDF855"
+end function
+
+' Icons point north; SceneGraph rotates counterclockwise, compass headings run clockwise.
+function HeadingRotation(heading as float) as float
+    return -heading * 3.14159265358979 / 180
+end function
+
+' SceneGraph has no line primitive, so a segment is a thin rectangle rotated about its start.
+sub AddLineSegment(parent as object, x1 as float, y1 as float, x2 as float, y2 as float, color as string, thickness as integer)
+    dx = x2 - x1
+    dy = y2 - y1
+    length = Sqr((dx * dx) + (dy * dy))
+    if length < 0.5
+        return
+    end if
+    segment = parent.CreateChild("Rectangle")
+    segment.width = length
+    segment.height = thickness
+    segment.translation = [x1, y1 - (thickness / 2)]
+    segment.scaleRotateCenter = [0, thickness / 2]
+    segment.rotation = Atan2(-dy, dx)
+    segment.color = color
+end sub
+
+function ByteHex(value as integer) as string
+    digits = "0123456789ABCDEF"
+    clamped = value
+    if clamped < 0
+        clamped = 0
+    else if clamped > 255
+        clamped = 255
+    end if
+    return Mid(digits, Int(clamped / 16) + 1, 1) + Mid(digits, (clamped mod 16) + 1, 1)
+end function
 
 sub AnimateRadarMarkers()
     if m.radarMarkers = invalid or m.radarMarkers.Count() = 0
@@ -1850,9 +2259,9 @@ sub AnimateRadarMarkers()
             markerRecord.group.visible = distanceMiles <= m.config.radiusMiles
             if markerRecord.group.visible
                 markerRecord.group.translation = [center + (position.eastMiles * scale), center - (position.northMiles * scale)]
-                projectionDistance = DistanceToRadarEdge(position.eastMiles, position.northMiles, aircraft.heading, m.config.radiusMiles)
-                markerRecord.path.width = projectionDistance * scale
-                markerRecord.path.visible = projectionDistance > 0
+                if markerRecord.icon <> invalid
+                    markerRecord.icon.rotation = HeadingRotation(NumberOr(position.heading, aircraft.heading))
+                end if
             end if
         end if
     end for
@@ -1896,7 +2305,8 @@ sub PositionCloseupPip()
 
     center = m.config.closeupViewportSize / 2
     m.closeupMarkerRecord.group.translation = [center, center]
-    m.closeupMarkerRecord.path.rotation = (90 - aircraft.heading) * 3.14159265358979 / 180
+    m.closeupMarkerRecord.path.rotation = (90 - NumberOr(position.heading, aircraft.heading)) * 3.14159265358979 / 180
+    m.closeupMarkerRecord.icon.rotation = HeadingRotation(NumberOr(position.heading, aircraft.heading))
 
     radiusMiles = m.config.closeupRadiusFeet / 5280.0
     homeEastMiles = 0 - position.eastMiles
@@ -1921,11 +2331,11 @@ function ProjectedAircraftPosition(aircraft as object, animationSeconds as float
         elapsedSeconds = maximumSeconds
     end if
 
-    headingRadians = aircraft.heading * 3.14159265358979 / 180
-    traveledMiles = aircraft.speedKnots * 1.150779 * elapsedSeconds / 3600
+    advanced = AdvancePosition(aircraft.eastMiles, aircraft.northMiles, aircraft.heading, aircraft.speedKnots, NumberOr(aircraft.turnRate, 0), NumberOr(aircraft.navHeading, -1), elapsedSeconds)
     return {
-        eastMiles: aircraft.eastMiles + (traveledMiles * Sin(headingRadians))
-        northMiles: aircraft.northMiles + (traveledMiles * Cos(headingRadians))
+        eastMiles: advanced.eastMiles
+        northMiles: advanced.northMiles
+        heading: advanced.heading
         elapsedSeconds: elapsedSeconds
     }
 end function
@@ -1945,19 +2355,3 @@ function InterpolatedAircraftPosition(aircraft as object) as object
     return position
 end function
 
-function DistanceToRadarEdge(eastMiles as float, northMiles as float, heading as float, radiusMiles as float) as float
-    headingRadians = heading * 3.14159265358979 / 180
-    eastUnit = Sin(headingRadians)
-    northUnit = Cos(headingRadians)
-    b = 2 * ((eastMiles * eastUnit) + (northMiles * northUnit))
-    c = (eastMiles * eastMiles) + (northMiles * northMiles) - (radiusMiles * radiusMiles)
-    discriminant = (b * b) - (4 * c)
-    if discriminant < 0
-        return 0
-    end if
-    distance = (-b + Sqr(discriminant)) / 2
-    if distance < 0
-        return 0
-    end if
-    return distance
-end function

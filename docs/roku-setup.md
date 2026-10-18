@@ -18,13 +18,17 @@ Roku's official instructions are at [Activating developer mode](https://develope
 
 Run:
 
-```powershell
+```sh
 npm run setup
 ```
 
 The script lists likely IPv4 addresses. You can also run:
 
-```powershell
+```sh
+# macOS (Wi-Fi is usually en0; Ethernet may be en1 or another enN)
+ipconfig getifaddr en0
+
+# Windows
 ipconfig
 ```
 
@@ -41,25 +45,30 @@ Reserve the computer and Roku addresses in your router's DHCP settings if possib
 
 ## 3. Start the local service
 
-```powershell
+```sh
 npm run api
 ```
 
-On first launch, Windows Firewall may ask whether Node.js can accept connections. Allow it on **Private networks** only. Leave the terminal open whenever Flight Lane is in use.
+On first launch, the firewall may ask whether Node.js can accept incoming connections:
+
+- **macOS:** select **Allow** when asked whether `node` may accept incoming network connections. If you dismissed the prompt, open **System Settings > Network > Firewall > Options** and set `node` to allow incoming connections. macOS may also ask for **Local Network** access for your terminal app; allow it so the deploy and debug helpers can reach the Roku (**System Settings > Privacy & Security > Local Network**).
+- **Windows:** allow Node.js on **Private networks** only.
+
+Leave the terminal open whenever Flight Lane is in use. For everyday use, start it with `npm run serve` instead, which restarts the service automatically if it crashes or hangs. To keep a Mac from sleeping while the service runs, start it with `caffeinate -i npm run serve`.
 
 Verify it locally:
 
-```powershell
-Invoke-RestMethod http://localhost:8787/health
+```sh
+curl http://localhost:8787/health
 ```
 
-The health response reports which optional features have keys configured. It never returns the keys.
+The health response reports which optional features are enabled.
 
 ## 4. Install Flight Lane
 
 The automated installer builds the ZIP, asks for the developer password, and uploads it:
 
-```powershell
+```sh
 npm run deploy
 ```
 
@@ -82,8 +91,12 @@ The app should launch immediately and appear as a development app on the Roku ho
 On first launch, enter the location to monitor. Use the `*` button later to:
 
 - change the address;
-- select a radius from 1 through 10 miles;
-- choose the idle display timeout.
+- select a radius from 1 through 25 miles (1-mile steps to 10, then 15, 20, and 25);
+- choose the idle display timeout;
+- choose how much flown track to draw behind aircraft (**Aircraft trails**: Off, 1, 2, or 5 minutes; default from `TRAIL_MINUTES`);
+- choose how often the local service polls the aircraft provider (**Provider polling**: every 2, 5, 10, 15, 30, or 60 seconds; default from `PROVIDER_POLL_SECONDS`);
+- color aircraft by altitude (**Color by altitude**; default from `COLOR_BY_ALTITUDE`, off);
+- show or hide the 24-hour flyover count in the header. Its default comes from `SHOW_FLYOVER_COUNT` in `.env.local` (on unless set to `false`); a choice made in settings is saved on the Roku and takes precedence.
 
 The live list and map show only aircraft inside the selected radar radius. The PIP follows the selected aircraft; choosing a plane manually keeps that selection until it disappears from the area.
 
@@ -91,7 +104,7 @@ The live list and map show only aircraft inside the selected radar radius. The P
 
 Build the standalone package with:
 
-```powershell
+```sh
 npm run build:screensaver
 ```
 
@@ -103,7 +116,7 @@ Roku permits only one sideloaded development app, so installing the screensaver 
 
 Pull the latest code, install dependencies if the lockfile changed, restart the local service, and deploy again:
 
-```powershell
+```sh
 git pull
 npm install
 npm run deploy

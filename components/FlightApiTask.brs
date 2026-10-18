@@ -91,6 +91,9 @@ function FetchNearbyAircraft(params as object) as object
     url = config.flightLaneApiUrl + "/v1/aircraft/nearby?latitude=" + config.homeLatitude.ToStr()
     url = url + "&longitude=" + config.homeLongitude.ToStr()
     url = url + "&radiusMiles=" + RoundTo(config.radiusMiles, 2).ToStr()
+    if IsNumericValue(params.pollSeconds)
+        url = url + "&pollSeconds=" + Int(params.pollSeconds).ToStr()
+    end if
 
     response = HttpRequest(url, AuthHeaders(params))
     data = ParseJsonBody(response.body)
@@ -141,6 +144,8 @@ function FetchNearbyAircraft(params as object) as object
         aircraft: aircraft
         counterAircraft: counterAircraft
         updatedAt: data.now
+        source: StringOr(data.flightLaneSource, "")
+        flightAware: data.flightAware
     })
 end function
 
@@ -234,9 +239,44 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
     end if
 
     operatorName = StringOr(rawAircraft.ownOp, "")
+    military = (Int(NumberOr(rawAircraft.dbFlags, 0)) and 1) = 1
+    kind = AircraftKind(StringOr(rawAircraft.category, ""), StringOr(rawAircraft.t, ""), military)
     airline = AirlineIdentity(callsign, operatorName)
     phase = EstimatePhase(onGround, altitudeFt, verticalRate)
-    closest = ClosestApproach(eastMiles, northMiles, heading, speedKnots)
+    turnRate = NumberOr(rawAircraft.fl_turn_rate, 0)
+    navHeading = NumberOr(rawAircraft.nav_heading, -1)
+    if onGround
+        turnRate = 0
+        navHeading = -1
+    end if
+    closest = ClosestApproach(eastMiles, northMiles, heading, speedKnots, turnRate, navHeading)
+
+    ' Earlier reported positions from the local service, converted like the current one.
+    trail = []
+    if Type(rawAircraft.fl_trail) = "roArray"
+        for each point in rawAircraft.fl_trail
+            if Type(point) = "roArray" and point.Count() >= 2 and IsNumericValue(point[0]) and IsNumericValue(point[1])
+                ageSeconds = 0
+                if point.Count() >= 3
+                    ageSeconds = NumberOr(point[2], 0)
+                end if
+                ' Altitude in feet, -1 on the ground; unknown points use the current altitude.
+                pointAltitude = altitudeFt
+                pointOnGround = onGround
+                if point.Count() >= 4 and IsNumericValue(point[3])
+                    pointAltitude = point[3]
+                    pointOnGround = point[3] < 0
+                end if
+                trail.Push({
+                    northMiles: (point[0] - config.homeLatitude) * 69.0
+                    eastMiles: (point[1] - config.homeLongitude) * 69.172 * Cos(latitudeRadians)
+                    ageSeconds: ageSeconds
+                    altitudeFt: pointAltitude
+                    onGround: pointOnGround
+                })
+            end if
+        end for
+    end if
     sourceAgeSeconds = NumberOr(rawAircraft.seen_pos, NumberOr(rawAircraft.seen, 0)) + payloadAgeSeconds
     if sourceAgeSeconds < 0
         sourceAgeSeconds = 0
@@ -249,6 +289,8 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
         callsign: callsign
         registration: registration
         aircraftType: StringOr(rawAircraft.t, "")
+        kind: kind
+        military: military
         aircraftDescription: StringOr(rawAircraft.desc, "")
         operatorName: operatorName
         airlineName: airline.name
@@ -264,6 +306,9 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
         onGround: onGround
         speedKnots: speedKnots
         heading: heading
+        turnRate: turnRate
+        navHeading: navHeading
+        trail: trail
         verticalRateFpm: verticalRate
         phase: phase
         closestMiles: closest.distanceMiles
@@ -273,6 +318,40 @@ function NormalizeAircraft(rawAircraft as object, config as object, payloadAgeSe
         squawk: StringOr(rawAircraft.squawk, "")
         sourceAgeSeconds: sourceAgeSeconds
     }
+end function
+
+'
+' Icon class from the ADS-B emitter category, ICAO type, and the military flag (dbFlags bit 1):
+' rotorcraft, military, airliner, light, or ground.
+function AircraftKind(category as string, typeCode as string, military as boolean) as string
+    category = UCase(category)
+    if category = "A7" or IsHelicopterType(typeCode)
+        return "rotorcraft"
+    end if
+    if military
+        return "military"
+    end if
+    if category = "A3" or category = "A4" or category = "A5" or category = "A6"
+        return "airliner"
+    end if
+    if category = "C1" or category = "C2" or category = "C3"
+        return "ground"
+    end if
+    return "light"
+end function
+
+' Common helicopter ICAO type designators, for aircraft that report no emitter category.
+function IsHelicopterType(typeCode as string) as boolean
+    helicopterTypes = {
+        AS50: true, AS55: true, AS65: true, A109: true, A119: true, A139: true, A169: true
+        B06: true, B06T: true, B407: true, B412: true, B429: true, B505: true
+        EC20: true, EC25: true, EC30: true, EC35: true, EC45: true, EC55: true, EC75: true
+        H125: true, H130: true, H135: true, H145: true, H155: true, H160: true, H175: true
+        H47: true, H53: true, H60: true, H64: true, H72: true, H269: true, H500: true
+        MD52: true, MD60: true, MD90: true, R22: true, R44: true, R66: true
+        S76: true, S92: true, UH1: true, UH1Y: true, AH1: true, BK17: true
+    }
+    return helicopterTypes.DoesExist(UCase(typeCode))
 end function
 
 function AirlineIdentity(callsign as string, operatorName as string) as object
@@ -360,28 +439,28 @@ function EstimatePhase(onGround as boolean, altitudeFt as float, verticalRate as
     return "Level flight"
 end function
 
-function ClosestApproach(eastMiles as float, northMiles as float, heading as float, speedKnots as float) as object
+' Closest approach to home along the projected path (curving with the current turn), sampled
+' every 20 seconds for up to 10 minutes.
+function ClosestApproach(eastMiles as float, northMiles as float, heading as float, speedKnots as float, turnRate as float, navHeading as float) as object
+    startDistance = Sqr((eastMiles * eastMiles) + (northMiles * northMiles))
     if speedKnots <= 1
-        return { approaching: false, distanceMiles: Sqr((eastMiles * eastMiles) + (northMiles * northMiles)), etaMinutes: -1 }
+        return { approaching: false, distanceMiles: startDistance, etaMinutes: -1 }
     end if
 
-    headingRadians = heading * 3.14159265358979 / 180
-    speedMph = speedKnots * 1.150779
-    eastVelocity = speedMph * Sin(headingRadians)
-    northVelocity = speedMph * Cos(headingRadians)
-    speedSquared = (eastVelocity * eastVelocity) + (northVelocity * northVelocity)
-    timeHours = -1 * (((eastMiles * eastVelocity) + (northMiles * northVelocity)) / speedSquared)
-    if timeHours <= 0
-        return { approaching: false, distanceMiles: Sqr((eastMiles * eastMiles) + (northMiles * northMiles)), etaMinutes: -1 }
+    bestDistance = startDistance
+    bestSeconds = 0
+    for seconds = 20 to 600 step 20
+        position = AdvancePosition(eastMiles, northMiles, heading, speedKnots, turnRate, navHeading, seconds)
+        distance = Sqr((position.eastMiles * position.eastMiles) + (position.northMiles * position.northMiles))
+        if distance < bestDistance
+            bestDistance = distance
+            bestSeconds = seconds
+        end if
+    end for
+    if bestSeconds = 0
+        return { approaching: false, distanceMiles: startDistance, etaMinutes: -1 }
     end if
-
-    closestEast = eastMiles + (eastVelocity * timeHours)
-    closestNorth = northMiles + (northVelocity * timeHours)
-    return {
-        approaching: true
-        distanceMiles: Sqr((closestEast * closestEast) + (closestNorth * closestNorth))
-        etaMinutes: timeHours * 60
-    }
+    return { approaching: true, distanceMiles: bestDistance, etaMinutes: bestSeconds / 60 }
 end function
 
 sub SortAircraftByDistance(aircraft as object)
@@ -409,7 +488,7 @@ function FetchFlightDetails(params as object) as object
 
     url = config.flightLaneApiUrl + "/v1/flights/" + UrlEncode(callsign)
     response = HttpRequest(url, AuthHeaders(params))
-    print "Flight Lane debug: FlightAware lookup for "; callsign; " HTTP "; response.code
+    print "Flight Lane debug: route lookup for "; callsign; " HTTP "; response.code
     data = ParseJsonBody(response.body)
     if response.code < 200 or response.code >= 300 or data = invalid
         result = FailureResult("flightDetails", ResponseError(response, data), response.code)
@@ -445,6 +524,7 @@ function FetchFlightDetails(params as object) as object
         estimatedOn: StringOr(selectedFlight.estimated_on, "")
         actualOn: StringOr(selectedFlight.actual_on, "")
         routeDistanceMiles: NumberOr(selectedFlight.route_distance, 0)
+        source: StringOr(data.source, "")
     })
 end function
 

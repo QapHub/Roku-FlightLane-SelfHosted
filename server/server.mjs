@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(MODULE_DIR, "..");
 const DEFAULT_ENV_PATH = path.join(REPO_ROOT, ".env.local");
-const DEFAULT_AIRCRAFT_API = "https://api.airplanes.live/v2";
+const DEFAULT_AIRCRAFT_API = "https://api.adsb.lol/v2";
 const BACKUP_AIRCRAFT_PROVIDERS = [
   {
     name: "adsb.lol",
@@ -20,21 +20,72 @@ const BACKUP_AIRCRAFT_PROVIDERS = [
     pathStyle: "named",
   },
 ];
-const FLIGHT_DETAILS_API = "https://aeroapi.flightaware.com/aeroapi";
-const GEOCODING_API = "https://maps.googleapis.com/maps/api/geocode/json";
-const STATIC_MAP_API = "https://maps.googleapis.com/maps/api/staticmap";
+// After a refusal, skip a provider for a while instead of retrying it on every refresh.
+const PROVIDER_COOLDOWN_MS = { rateLimited: 30 * 1000, forbidden: 30 * 60 * 1000, failed: 30 * 1000 };
+const FLIGHT_ROUTE_API = "https://api.adsbdb.com/v0/callsign";
+// Optional, billed per query. Preferred for routes when a key is set, until the spend limit.
+const FLIGHTAWARE_FLIGHTS_API = "https://aeroapi.flightaware.com/aeroapi/flights";
+// Free to call. FlightAware refreshes account usage data every 10 minutes.
+const FLIGHTAWARE_USAGE_API = "https://aeroapi.flightaware.com/aeroapi/account/usage";
+const FLIGHTAWARE_USAGE_REFRESH_MS = 10 * 60 * 1000;
+const FLIGHTAWARE_USAGE_STALE_MS = 30 * 60 * 1000;
+const GEOCODING_API = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress";
+// Public-domain USDA/USGS orthoimagery from The National Map (United States coverage).
+const IMAGERY_EXPORT_API =
+  "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export";
+const IMAGERY_ATTRIBUTION = "USDA, USGS The National Map";
+const WEB_MERCATOR_RADIUS_METERS = 6378137;
 const AIRCRAFT_PHOTO_API = "https://api.planespotters.net/pub/photos/reg";
-const USER_AGENT = "FlightLaneSelfHosted/1.0";
+// Planespotters (and good API etiquette) require a contact URL in server User-Agents.
+const USER_AGENT =
+  "FlightLaneSelfHosted/1.0 (+https://github.com/QapHub/Roku-FlightLane-SelfHosted)";
 const MAX_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_MAP_BYTES = 8 * 1024 * 1024;
+const MAP_CACHE_MAX_ENTRIES = 200;
 const MAX_REQUEST_BYTES = 16 * 1024;
 const CALLSIGN_PATTERN = /^[A-Z0-9][A-Z0-9_-]{1,15}$/;
 const REGISTRATION_PATTERN = /^[A-Z0-9][A-Z0-9-]{1,15}$/;
 
+// Counts billed provider calls per UTC day and refuses calls past the limit.
+class DailyBudget {
+  constructor(limit) {
+    this.limit = limit;
+    this.day = "";
+    this.used = 0;
+    this.exhaustedLogged = false;
+  }
+
+  rollOver() {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== this.day) {
+      this.day = today;
+      this.used = 0;
+      this.exhaustedLogged = false;
+    }
+  }
+
+  remaining() {
+    this.rollOver();
+    return Math.max(0, this.limit - this.used);
+  }
+
+  percentUsed() {
+    this.rollOver();
+    return this.limit > 0 ? Math.min(100, Math.round((this.used / this.limit) * 100)) : 100;
+  }
+
+  tryConsume() {
+    if (this.remaining() === 0) return false;
+    this.used += 1;
+    return true;
+  }
+}
+
 class TtlCache {
-  constructor() {
+  constructor({ maxEntries = Infinity } = {}) {
     this.values = new Map();
     this.pending = new Map();
+    this.maxEntries = maxEntries;
   }
 
   get(key) {
@@ -48,10 +99,14 @@ class TtlCache {
   }
 
   set(key, value, ttlSeconds) {
+    this.values.delete(key);
     this.values.set(key, {
       expiresAt: Date.now() + Math.max(0, ttlSeconds) * 1000,
       value,
     });
+    while (this.values.size > this.maxEntries) {
+      this.values.delete(this.values.keys().next().value);
+    }
   }
 
   async getOrLoad(key, ttlSeconds, loader) {
@@ -122,8 +177,19 @@ function booleanSetting(environment, name, fallback) {
 }
 
 export function createConfig(environment) {
-  const mapsKey = String(environment.GOOGLE_MAPS_API_KEY || "").trim();
-  const geocodingKey = String(environment.GOOGLE_GEOCODING_API_KEY || mapsKey).trim();
+  const config = buildConfig(environment);
+  if (
+    config.flightAwareSpendWarning !== undefined &&
+    config.flightAwareSpendWarning > config.flightAwareSpendLimit
+  ) {
+    throw new Error(
+      "FLIGHTAWARE_API_SPEND_WARNING must not be greater than FLIGHTAWARE_API_SPEND_LIMIT.",
+    );
+  }
+  return config;
+}
+
+function buildConfig(environment) {
   const aircraftBaseUrl = String(
     environment.AIRCRAFT_API_BASE_URL || DEFAULT_AIRCRAFT_API,
   ).replace(/\/+$/, "");
@@ -139,22 +205,37 @@ export function createConfig(environment) {
     timeoutMs: numberSetting(environment, "PROVIDER_TIMEOUT_MS", 10000, 1000, 60000),
     aircraftBaseUrl,
     aircraftProviders: createAircraftProviders(aircraftBaseUrl),
+    // Default seconds between provider polls while a Roku is active; a Roku can request its
+    // own interval from settings. ADSB.fi allows 1 request/second; ADSB.lol throttles bursts.
+    // AIRCRAFT_CACHE_SECONDS is the earlier name for this setting.
     aircraftCacheSeconds: numberSetting(
-      environment,
-      "AIRCRAFT_CACHE_SECONDS",
-      15,
+      {
+        PROVIDER_POLL_SECONDS:
+          environment.PROVIDER_POLL_SECONDS ?? environment.AIRCRAFT_CACHE_SECONDS,
+      },
+      "PROVIDER_POLL_SECONDS",
+      5,
       1,
-      3600,
+      300,
     ),
-    mapsKey,
-    geocodingKey,
+    mapCacheSeconds: numberSetting(environment, "MAP_CACHE_SECONDS", 86400, 0, 604800),
+    flightRoutesEnabled: booleanSetting(environment, "ENABLE_FLIGHT_ROUTES", true),
     flightAwareKey: String(environment.FLIGHTAWARE_API_KEY || "").trim(),
+    flightAwareCacheSeconds:
+      numberSetting(environment, "FLIGHTAWARE_CACHE_TTL", 1440, 15, 10080) * 60,
+    flightAwareDailyLimit: numberSetting(environment, "FLIGHTAWARE_DAILY_LIMIT", 500, 0, 10000),
+    // Optional: when unset, spending is still limited but never shown on screen.
+    flightAwareSpendWarning:
+      String(environment.FLIGHTAWARE_API_SPEND_WARNING ?? "").trim() === ""
+        ? undefined
+        : numberSetting(environment, "FLIGHTAWARE_API_SPEND_WARNING", 0, 0, 100000),
+    flightAwareSpendLimit: numberSetting(environment, "FLIGHTAWARE_API_SPEND_LIMIT", 10, 0, 100000),
     flightDetailsCacheSeconds: numberSetting(
       environment,
       "FLIGHT_DETAILS_CACHE_SECONDS",
-      900,
-      60,
       86400,
+      60,
+      604800,
     ),
     aircraftPhotosEnabled: booleanSetting(
       environment,
@@ -395,6 +476,25 @@ function logAircraftProviderFailure(provider, providerStatus, reason = "http_err
   );
 }
 
+function coolDownProvider(cooldowns, provider, status) {
+  if (!cooldowns) return;
+  const duration =
+    status === 403
+      ? PROVIDER_COOLDOWN_MS.forbidden
+      : status === 429
+        ? PROVIDER_COOLDOWN_MS.rateLimited
+        : PROVIDER_COOLDOWN_MS.failed;
+  cooldowns.set(provider.name, Date.now() + duration);
+  console.error(
+    JSON.stringify({
+      event: "provider_cooldown",
+      feature: "Aircraft data",
+      provider: provider.name,
+      seconds: duration / 1000,
+    }),
+  );
+}
+
 export async function fetchAircraftPositionsFromProviders({
   fetchImpl = globalThis.fetch,
   providers,
@@ -402,9 +502,13 @@ export async function fetchAircraftPositionsFromProviders({
   longitude,
   radiusNauticalMiles,
   timeoutMs,
+  cooldowns,
 }) {
   const failures = [];
-  for (const provider of providers) {
+  const now = Date.now();
+  const ready = providers.filter((provider) => !(cooldowns?.get(provider.name) > now));
+  // If every provider is cooling down, try them all rather than return nothing.
+  for (const provider of ready.length > 0 ? ready : providers) {
     const providerUrl = aircraftProviderUrl(
       provider,
       latitude,
@@ -419,16 +523,20 @@ export async function fetchAircraftPositionsFromProviders({
       if (!upstream.ok) {
         failures.push({ provider: provider.name, status: upstream.status });
         logAircraftProviderFailure(provider.name, upstream.status);
+        coolDownProvider(cooldowns, provider, upstream.status);
         continue;
       }
       if (!isAircraftPositionPayload(upstream.data)) {
         failures.push({ provider: provider.name, status: 502 });
         logAircraftProviderFailure(provider.name, 502, "invalid_payload");
+        coolDownProvider(cooldowns, provider, 502);
         continue;
       }
+      cooldowns?.delete(provider.name);
       return { payload: upstream.data, provider: provider.name, failures };
     } catch (error) {
       failures.push({ provider: provider.name });
+      coolDownProvider(cooldowns, provider, 0);
       console.error(
         JSON.stringify({
           event: "provider_request_failed",
@@ -442,18 +550,507 @@ export async function fetchAircraftPositionsFromProviders({
   return { failures };
 }
 
+// Converts a center/zoom/size request (Web Mercator zoom levels) into a Web Mercator bounding box so the
+// image covers exactly the area the Roku expects (scale 2: two image pixels per logical pixel).
+export function mapBoundingBox(latitude, longitude, zoom, logicalSize) {
+  const radians = Math.PI / 180;
+  const centerX = WEB_MERCATOR_RADIUS_METERS * longitude * radians;
+  const centerY =
+    WEB_MERCATOR_RADIUS_METERS * Math.log(Math.tan(Math.PI / 4 + (latitude * radians) / 2));
+  const metersPerLogicalPixel = (2 * Math.PI * WEB_MERCATOR_RADIUS_METERS) / 256 / 2 ** zoom;
+  const half = (logicalSize * metersPerLogicalPixel) / 2;
+  return [centerX - half, centerY - half, centerX + half, centerY + half].map((value) =>
+    rounded(value, 2),
+  );
+}
+
+const PROVIDER_DISPLAY_NAMES = {
+  "airplanes.live": "Airplanes.live",
+  "adsb.lol": "ADSB.lol",
+  "adsb.fi": "ADSB.fi",
+};
+
+function providerDisplayName(provider) {
+  return PROVIDER_DISPLAY_NAMES[provider] || cleanText(provider, 60);
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+const TRACK_HISTORY_MS = 5 * 60 * 1000;
+const TRACK_HISTORY_MAX_AIRCRAFT = 2000;
+const TRAIL_SPACING_MS = 10 * 1000;
+const TRAIL_TURN_DEGREES = 8;
+const TRAIL_MAX_POINTS = 30;
+// Poll in the background only while a Roku has asked for this area recently.
+const ACTIVE_AREA_MS = 2 * 60 * 1000;
+
+function wrapDegrees(value) {
+  return ((((value + 180) % 360) + 360) % 360) - 180;
+}
+
+// Records each aircraft's reported positions so the Roku can draw where it actually flew.
+export class AircraftTrackHistory {
+  constructor() {
+    this.tracks = new Map();
+  }
+
+  record(payload, now = Date.now()) {
+    const aircraftList = Array.isArray(payload?.ac) ? payload.ac : payload?.aircraft;
+    for (const aircraft of Array.isArray(aircraftList) ? aircraftList : []) {
+      const id = typeof aircraft?.hex === "string" ? aircraft.hex.toLowerCase() : "";
+      const latitude = Number(aircraft?.lat);
+      const longitude = Number(aircraft?.lon);
+      if (!id || !Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
+      const seen = Number(aircraft.seen_pos ?? aircraft.seen ?? 0);
+      const time = now - (Number.isFinite(seen) ? seen * 1000 : 0);
+      const track = Number(aircraft.track);
+      // Altitude in feet, or -1 on the ground, so trails can be colored by altitude.
+      const barometric = aircraft.alt_baro ?? aircraft.alt_geom;
+      const altitude =
+        String(barometric).toLowerCase() === "ground" ? -1 : Math.round(Number(barometric));
+      const points = this.tracks.get(id) || [];
+      const last = points[points.length - 1];
+      if (last && time <= last.time + 500) continue;
+      points.push({
+        time,
+        latitude,
+        longitude,
+        track: Number.isFinite(track) ? track : undefined,
+        altitude: Number.isFinite(altitude) ? altitude : undefined,
+      });
+      this.tracks.delete(id);
+      this.tracks.set(id, points);
+    }
+    this.prune(now);
+  }
+
+  prune(now = Date.now()) {
+    for (const [id, points] of this.tracks) {
+      while (points.length > 0 && points[0].time < now - TRACK_HISTORY_MS) points.shift();
+      if (points.length === 0) this.tracks.delete(id);
+    }
+    while (this.tracks.size > TRACK_HISTORY_MAX_AIRCRAFT) {
+      this.tracks.delete(this.tracks.keys().next().value);
+    }
+  }
+
+  // Earlier positions as [latitude, longitude, age in seconds, altitude in feet (-1 on the
+  // ground, null if unknown)], oldest first: about one every
+  // 10 seconds, plus any point where the track turned, so curves keep their shape. The newest
+  // position is the aircraft itself.
+  trail(id, now = Date.now()) {
+    const points = this.tracks.get(String(id || "").toLowerCase()) || [];
+    const selected = [];
+    let anchor = points[points.length - 1];
+    for (let index = points.length - 2; index >= 0 && selected.length < TRAIL_MAX_POINTS; index -= 1) {
+      const point = points[index];
+      const turned =
+        point.track !== undefined &&
+        anchor.track !== undefined &&
+        Math.abs(wrapDegrees(anchor.track - point.track)) >= TRAIL_TURN_DEGREES;
+      if (anchor.time - point.time >= TRAIL_SPACING_MS || turned) {
+        selected.push([
+          rounded(point.latitude, 5),
+          rounded(point.longitude, 5),
+          Math.max(0, Math.round((now - point.time) / 1000)),
+          point.altitude ?? null,
+        ]);
+        anchor = point;
+      }
+    }
+    return selected.reverse();
+  }
+
+  // Degrees per second (positive = right turn) from the track over the last 6-30 seconds.
+  turnRate(id) {
+    const points = (this.tracks.get(String(id || "").toLowerCase()) || []).filter(
+      (point) => point.track !== undefined,
+    );
+    const latest = points[points.length - 1];
+    if (!latest) return undefined;
+    for (let index = points.length - 2; index >= 0; index -= 1) {
+      const elapsed = (latest.time - points[index].time) / 1000;
+      if (elapsed < 6) continue;
+      if (elapsed > 30) break;
+      const rate = wrapDegrees(latest.track - points[index].track) / elapsed;
+      const clamped = Math.max(-5, Math.min(5, rate));
+      return Math.abs(clamped) < 0.2 ? 0 : rounded(clamped, 2);
+    }
+    return undefined;
+  }
+
+  // Adds fl_trail and fl_turn_rate to each aircraft without changing the cached payload.
+  annotate(payload) {
+    const key = Array.isArray(payload?.ac) ? "ac" : Array.isArray(payload?.aircraft) ? "aircraft" : "";
+    if (!key) return payload;
+    return {
+      ...payload,
+      [key]: payload[key].map((aircraft) => {
+        if (typeof aircraft?.hex !== "string") return aircraft;
+        const turnRate = this.turnRate(aircraft.hex);
+        return {
+          ...aircraft,
+          fl_trail: this.trail(aircraft.hex),
+          ...(turnRate === undefined ? {} : { fl_turn_rate: turnRate }),
+        };
+      }),
+    };
+  }
+}
+
+function flightTime(value) {
+  const time = Date.parse(String(value || ""));
+  return Number.isFinite(time) ? time : undefined;
+}
+
+// FlightAware returns every recent and scheduled flight for a flight number, often on
+// different routes (and each leg of a multi-stop flight separately). Pick the one being
+// flown now: airborne (departed, not landed), else the one whose departure-to-arrival
+// window is closest to now.
+export function selectCurrentFlight(flights, now = Date.now()) {
+  const candidates = (Array.isArray(flights) ? flights : []).filter(
+    (flight) => flight && typeof flight === "object" && flight.cancelled !== true,
+  );
+  if (candidates.length === 0) return undefined;
+
+  const departure = (flight) =>
+    flightTime(flight.actual_off) ?? flightTime(flight.estimated_off) ?? flightTime(flight.scheduled_off);
+  const arrival = (flight) =>
+    flightTime(flight.actual_on) ?? flightTime(flight.estimated_on) ?? flightTime(flight.scheduled_on);
+
+  // A cached "en route" record whose arrival passed long ago is stale, not airborne.
+  const airborne = candidates.filter(
+    (flight) =>
+      flightTime(flight.actual_off) !== undefined &&
+      flightTime(flight.actual_on) === undefined &&
+      (arrival(flight) ?? departure(flight)) + 2 * HOUR_MS > now,
+  );
+  if (airborne.length > 0) {
+    return airborne.reduce((latest, flight) =>
+      departure(flight) > departure(latest) ? flight : latest,
+    );
+  }
+
+  const distanceFromNow = (flight) => {
+    const departs = departure(flight);
+    const arrives = arrival(flight);
+    if (departs === undefined && arrives === undefined) return Infinity;
+    if (departs !== undefined && now < departs) return departs - now;
+    if (arrives !== undefined && now > arrives) return now - arrives;
+    return 0;
+  };
+  return candidates.reduce((closest, flight) =>
+    distanceFromNow(flight) < distanceFromNow(closest) ? flight : closest,
+  );
+}
+
+// Returns an adsbdb route in the flight-list shape the Roku app parses.
+function normalizeFlightRoute(callsign, data) {
+  const route = data?.response?.flightroute;
+  if (!route || typeof route !== "object") return { flights: [], source: "adsbdb.com" };
+  const airport = (value) => ({
+    code_iata: cleanText(value?.iata_code, 8),
+    code_icao: cleanText(value?.icao_code, 8),
+    name: cleanText(value?.name, 120),
+    city: cleanText(value?.municipality, 80),
+  });
+  return {
+    flights: [
+      {
+        ident: cleanText(route.callsign_icao, 16) || callsign,
+        ident_iata: cleanText(route.callsign_iata, 16),
+        operator: cleanText(route.airline?.name, 80),
+        origin: airport(route.origin),
+        destination: airport(route.destination),
+      },
+    ],
+    source: "adsbdb.com",
+  };
+}
+
+// Returns a Census match in the { status, results[].geometry.location } shape the Roku app parses.
+async function geocodeWithCensus(fetchImpl, config, address) {
+  const providerUrl = new URL(GEOCODING_API);
+  providerUrl.searchParams.set("address", address);
+  providerUrl.searchParams.set("benchmark", "Public_AR_Current");
+  providerUrl.searchParams.set("format", "json");
+  const upstream = await fetchJson(fetchImpl, providerUrl, {
+    headers: providerHeaders(),
+    signal: requestSignal(config.timeoutMs),
+  });
+  if (!upstream.ok) {
+    const error = new Error("Address lookup request failed.");
+    error.providerStatus = upstream.status;
+    error.feature = "Address lookup";
+    throw error;
+  }
+  const match = upstream.data?.result?.addressMatches?.[0];
+  const latitude = Number(match?.coordinates?.y);
+  const longitude = Number(match?.coordinates?.x);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return { status: "ZERO_RESULTS", results: [] };
+  }
+  return {
+    status: "OK",
+    results: [
+      {
+        formatted_address: cleanText(match.matchedAddress, 200) || address,
+        geometry: { location: { lat: latitude, lng: longitude } },
+      },
+    ],
+  };
+}
+
 export function createFlightLaneServer({
   config,
   fetchImpl = globalThis.fetch,
 } = {}) {
   if (!config) throw new Error("A server configuration is required.");
   const nearbyCache = new TtlCache();
+  const providerCooldowns = new Map();
+  const trackHistory = new AircraftTrackHistory();
+  const activeAreas = new Map();
+  let pollTimer;
+
+  async function loadAircraftArea({ latitude, longitude, radiusMiles }) {
+    const result = await fetchAircraftPositionsFromProviders({
+      fetchImpl,
+      providers: config.aircraftProviders,
+      latitude,
+      longitude,
+      radiusNauticalMiles: rounded(radiusMiles / 1.150779, 3),
+      timeoutMs: config.timeoutMs,
+      cooldowns: providerCooldowns,
+    });
+    if (result.payload === undefined || !result.provider) {
+      const lastFailure = result.failures[result.failures.length - 1];
+      const error = new Error("Aircraft data request failed.");
+      error.providerStatus = lastFailure?.status || 502;
+      throw error;
+    }
+    if (result.failures.length > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "provider_fallback",
+          feature: "Aircraft data",
+          provider: result.provider,
+          failedProviders: result.failures.map((failure) => failure.provider),
+        }),
+      );
+    }
+    trackHistory.record(result.payload);
+    return { payload: result.payload, provider: result.provider };
+  }
+
+  // Keeps track history dense between Roku refreshes by polling each area at its interval
+  // (the Roku's setting, or PROVIDER_POLL_SECONDS), but only for areas a Roku requested in
+  // the last two minutes.
+  function scheduleAircraftPolling() {
+    if (pollTimer) return;
+    pollTimer = setTimeout(async () => {
+      const now = Date.now();
+      for (const [key, area] of activeAreas) {
+        if (now - area.lastRequestedAt > ACTIVE_AREA_MS) {
+          activeAreas.delete(key);
+          continue;
+        }
+        if (now - area.lastPolledAt < area.pollSeconds * 1000) continue;
+        area.lastPolledAt = now;
+        try {
+          nearbyCache.set(key, await loadAircraftArea(area), area.pollSeconds * 3);
+        } catch {
+          // Failures are logged by the provider fallback; the next Roku request retries.
+        }
+      }
+      pollTimer = undefined;
+      if (activeAreas.size > 0) scheduleAircraftPolling();
+    }, 1000);
+    pollTimer.unref?.();
+  }
   const detailsCache = new TtlCache();
   const geocodeCache = new TtlCache();
+  const mapCache = new TtlCache({ maxEntries: MAP_CACHE_MAX_ENTRIES });
+  const flightAwareCache = new TtlCache();
+  const flightAwareBudget = new DailyBudget(config.flightAwareDailyLimit);
+  const flightAwareSpend = {
+    cost: undefined,
+    costPerPage: 0,
+    callsSinceCheck: 0,
+    month: "",
+    checkedAt: 0,
+    refreshing: undefined,
+    loggedState: "",
+  };
+
+  function currentUtcMonth() {
+    return new Date().toISOString().slice(0, 7);
+  }
+
+  // Reads this month's account-wide AeroAPI spend. Failures keep the previous reading,
+  // which goes stale after FLIGHTAWARE_USAGE_STALE_MS and then pauses billed calls.
+  function refreshFlightAwareSpend() {
+    if (flightAwareSpend.refreshing) return flightAwareSpend.refreshing;
+    flightAwareSpend.refreshing = (async () => {
+      const month = currentUtcMonth();
+      const providerUrl = new URL(FLIGHTAWARE_USAGE_API);
+      providerUrl.searchParams.set("start", `${month}-01`);
+      providerUrl.searchParams.set("all_keys", "true");
+      try {
+        const upstream = await fetchJson(fetchImpl, providerUrl, {
+          headers: providerHeaders({ "x-apikey": config.flightAwareKey }),
+          signal: requestSignal(config.timeoutMs),
+        });
+        const cost = Number(upstream.data?.total_cost);
+        if (!upstream.ok || !Number.isFinite(cost)) {
+          const error = new Error("FlightAware usage request failed.");
+          error.providerStatus = upstream.status;
+          throw error;
+        }
+        const pages = Number(upstream.data?.total_pages);
+        flightAwareSpend.cost = cost;
+        flightAwareSpend.costPerPage = pages > 0 ? cost / pages : 0;
+        flightAwareSpend.callsSinceCheck = 0;
+        flightAwareSpend.month = month;
+        flightAwareSpend.checkedAt = Date.now();
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "provider_error",
+            feature: "FlightAware usage",
+            providerStatus: Number.isInteger(error?.providerStatus) ? error.providerStatus : 0,
+          }),
+        );
+      } finally {
+        flightAwareSpend.refreshing = undefined;
+      }
+      flightAwareSpendStatus();
+    })();
+    return flightAwareSpend.refreshing;
+  }
+
+  function refreshFlightAwareSpendIfDue() {
+    if (
+      config.flightAwareKey &&
+      Date.now() - flightAwareSpend.checkedAt >= FLIGHTAWARE_USAGE_REFRESH_MS
+    ) {
+      refreshFlightAwareSpend();
+    }
+  }
+
+  // Usage data lags up to 10 minutes, so calls made since the last reading are added at the
+  // account's average cost per result page.
+  function flightAwareSpendStatus() {
+    const fresh =
+      flightAwareSpend.cost !== undefined &&
+      flightAwareSpend.month === currentUtcMonth() &&
+      Date.now() - flightAwareSpend.checkedAt < FLIGHTAWARE_USAGE_STALE_MS;
+    const estimated = fresh
+      ? rounded(
+          flightAwareSpend.cost + flightAwareSpend.callsSinceCheck * flightAwareSpend.costPerPage,
+          2,
+        )
+      : undefined;
+    let state = "ok";
+    if (!fresh) {
+      state =
+        flightAwareSpend.checkedAt === 0 && flightAwareSpend.refreshing ? "checking" : "unavailable";
+    } else if (estimated >= config.flightAwareSpendLimit) {
+      state = "limit";
+    } else if (
+      config.flightAwareSpendWarning !== undefined &&
+      estimated >= config.flightAwareSpendWarning
+    ) {
+      state = "warning";
+    }
+    if (state !== flightAwareSpend.loggedState && state !== "checking") {
+      flightAwareSpend.loggedState = state;
+      console.error(
+        JSON.stringify({
+          event: "flightaware_spend",
+          state,
+          monthToDateCost: estimated,
+          warning: config.flightAwareSpendWarning,
+          limit: config.flightAwareSpendLimit,
+        }),
+      );
+    }
+    return {
+      state,
+      monthToDateCost: estimated,
+      warning: config.flightAwareSpendWarning,
+      limit: config.flightAwareSpendLimit,
+      dailyPercent: flightAwareBudget.percentUsed(),
+      showSpend: config.flightAwareSpendWarning !== undefined,
+    };
+  }
+
+
+  // Returns FlightAware live status for a callsign, or undefined to fall back to free routes.
+  async function lookupFlightAware(callsign) {
+    try {
+      const cached = await flightAwareCache.getOrLoad(
+        callsign,
+        config.flightAwareCacheSeconds,
+        async () => {
+          if (Date.now() - flightAwareSpend.checkedAt >= FLIGHTAWARE_USAGE_REFRESH_MS) {
+            await refreshFlightAwareSpend();
+          }
+          const spend = flightAwareSpendStatus();
+          if (spend.state !== "ok" && spend.state !== "warning") {
+            const error = new Error("FlightAware spending is paused.");
+            error.budgetExhausted = true;
+            throw error;
+          }
+          if (!flightAwareBudget.tryConsume()) {
+            if (!flightAwareBudget.exhaustedLogged) {
+              flightAwareBudget.exhaustedLogged = true;
+              console.error(
+                JSON.stringify({
+                  event: "flightaware_daily_limit_reached",
+                  limit: config.flightAwareDailyLimit,
+                }),
+              );
+            }
+            const error = new Error("FlightAware daily limit reached.");
+            error.budgetExhausted = true;
+            throw error;
+          }
+          flightAwareSpend.callsSinceCheck += 1;
+          const upstream = await fetchJson(
+            fetchImpl,
+            `${FLIGHTAWARE_FLIGHTS_API}/${encodeURIComponent(callsign)}?max_pages=1`,
+            {
+              headers: providerHeaders({ "x-apikey": config.flightAwareKey }),
+              signal: requestSignal(config.timeoutMs),
+            },
+          );
+          if (!upstream.ok) {
+            const error = new Error("FlightAware request failed.");
+            error.providerStatus = upstream.status;
+            throw error;
+          }
+          const flights = Array.isArray(upstream.data?.flights) ? upstream.data.flights : [];
+          return { flights, source: "FlightAware", liveStatus: true };
+        },
+      );
+      if (cached.value.flights.length === 0) return undefined;
+      return cached;
+    } catch (error) {
+      if (!error?.budgetExhausted) {
+        console.error(
+          JSON.stringify({
+            event: "provider_error",
+            feature: "Flight status",
+            providerStatus: Number.isInteger(error?.providerStatus) ? error.providerStatus : 0,
+          }),
+        );
+      }
+      return undefined;
+    }
+  }
   const photoCache = new TtlCache();
   const startedAt = Date.now();
 
-  return http.createServer(async (request, response) => {
+  const server = http.createServer(async (request, response) => {
     try {
       if (
         config.localNetworkOnly &&
@@ -476,11 +1073,13 @@ export function createFlightLaneServer({
           uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
           features: {
             liveAircraft: true,
-            satelliteMaps: Boolean(config.mapsKey),
-            addressLookup: Boolean(config.geocodingKey),
-            flightDetails: Boolean(config.flightAwareKey),
+            satelliteMaps: true,
+            addressLookup: true,
+            flightDetails: config.flightRoutesEnabled,
+            liveFlightStatus: config.flightRoutesEnabled && Boolean(config.flightAwareKey),
             aircraftPhotos: config.aircraftPhotosEnabled,
           },
+          flightAwareSpend: config.flightAwareKey ? flightAwareSpendStatus() : undefined,
         });
         return;
       }
@@ -508,11 +1107,11 @@ export function createFlightLaneServer({
           longitude < -180 ||
           longitude > 180 ||
           radiusMiles < 1 ||
-          radiusMiles > 10
+          radiusMiles > 25
         ) {
           writeJson(response, 400, {
             ok: false,
-            error: "Valid coordinates and a radius from 1 to 10 miles are required.",
+            error: "Valid coordinates and a radius from 1 to 25 miles are required.",
           });
           return;
         }
@@ -521,39 +1120,36 @@ export function createFlightLaneServer({
         const roundedLongitude = rounded(longitude, 4);
         const roundedRadius = rounded(radiusMiles, 2);
         const cacheKey = `${roundedLatitude}/${roundedLongitude}/${roundedRadius}`;
-        const cached = await nearbyCache.getOrLoad(
-          cacheKey,
-          config.aircraftCacheSeconds,
-          async () => {
-            const radiusNauticalMiles = roundedRadius / 1.150779;
-            const result = await fetchAircraftPositionsFromProviders({
-              fetchImpl,
-              providers: config.aircraftProviders,
-              latitude: roundedLatitude,
-              longitude: roundedLongitude,
-              radiusNauticalMiles: rounded(radiusNauticalMiles, 3),
-              timeoutMs: config.timeoutMs,
-            });
-            if (result.payload === undefined || !result.provider) {
-              const lastFailure = result.failures[result.failures.length - 1];
-              const error = new Error("Aircraft data request failed.");
-              error.providerStatus = lastFailure?.status || 502;
-              throw error;
-            }
-            if (result.failures.length > 0) {
-              console.warn(
-                JSON.stringify({
-                  event: "provider_fallback",
-                  feature: "Aircraft data",
-                  provider: result.provider,
-                  failedProviders: result.failures.map((failure) => failure.provider),
-                }),
-              );
-            }
-            return { payload: result.payload, provider: result.provider };
-          },
+        const requestedPoll = url.searchParams.has("pollSeconds")
+          ? queryNumber(url, "pollSeconds")
+          : undefined;
+        const pollSeconds =
+          Number.isInteger(requestedPoll) && requestedPoll >= 1 && requestedPoll <= 300
+            ? requestedPoll
+            : config.aircraftCacheSeconds;
+        const area = {
+          latitude: roundedLatitude,
+          longitude: roundedLongitude,
+          radiusMiles: roundedRadius,
+        };
+        const previous = activeAreas.get(cacheKey);
+        activeAreas.set(cacheKey, {
+          ...area,
+          pollSeconds,
+          lastRequestedAt: Date.now(),
+          lastPolledAt: previous?.lastPolledAt ?? Date.now(),
+        });
+        const cached = await nearbyCache.getOrLoad(cacheKey, pollSeconds, () =>
+          loadAircraftArea(area),
         );
-        writeJson(response, 200, cached.value.payload, {
+        scheduleAircraftPolling();
+        refreshFlightAwareSpendIfDue();
+        const payload = {
+          ...trackHistory.annotate(cached.value.payload),
+          flightLaneSource: providerDisplayName(cached.value.provider),
+          flightAware: config.flightAwareKey ? flightAwareSpendStatus() : undefined,
+        };
+        writeJson(response, 200, payload, {
           "X-FlightLane-Cache": cached.cacheStatus,
           "X-FlightLane-Provider": cached.value.provider,
         });
@@ -567,27 +1163,37 @@ export function createFlightLaneServer({
           writeJson(response, 400, { ok: false, error: "Invalid flight number." });
           return;
         }
-        if (!config.flightAwareKey) {
+        if (!config.flightRoutesEnabled) {
           writeJson(response, 200, { flights: [] });
           return;
+        }
+        if (config.flightAwareKey) {
+          const live = await lookupFlightAware(callsign);
+          const current = live && selectCurrentFlight(live.value.flights);
+          if (current) {
+            writeJson(response, 200, { ...live.value, flights: [current] }, {
+              "X-FlightLane-Cache": live.cacheStatus,
+            });
+            return;
+          }
         }
         const cached = await detailsCache.getOrLoad(
           callsign,
           config.flightDetailsCacheSeconds,
           async () => {
-            const providerUrl =
-              `${FLIGHT_DETAILS_API}/flights/${encodeURIComponent(callsign)}` +
-              "?max_pages=1";
+            const providerUrl = `${FLIGHT_ROUTE_API}/${encodeURIComponent(callsign)}`;
             const upstream = await fetchJson(fetchImpl, providerUrl, {
-              headers: providerHeaders({ "x-apikey": config.flightAwareKey }),
+              headers: providerHeaders(),
               signal: requestSignal(config.timeoutMs),
             });
+            if (upstream.status === 404) return { flights: [] };
             if (!upstream.ok) {
-              const error = new Error("Flight details request failed.");
+              const error = new Error("Flight route request failed.");
               error.providerStatus = upstream.status;
+              error.feature = "Flight route";
               throw error;
             }
-            return upstream.data;
+            return normalizeFlightRoute(callsign, upstream.data);
           },
         );
         writeJson(response, 200, cached.value, {
@@ -597,14 +1203,6 @@ export function createFlightLaneServer({
       }
 
       if (method === "POST" && url.pathname === "/v1/geocode") {
-        if (!config.geocodingKey) {
-          writeJson(response, 503, {
-            ok: false,
-            error:
-              "Address lookup is not configured. Add a Google Geocoding API key to .env.local.",
-          });
-          return;
-        }
         const payload = await readRequestJson(request);
         const address = cleanText(payload.address, 200);
         if (!address || address.length < 5) {
@@ -616,19 +1214,7 @@ export function createFlightLaneServer({
         }
         const cacheKey = address.toLowerCase();
         const cached = await geocodeCache.getOrLoad(cacheKey, 86400, async () => {
-          const providerUrl = new URL(GEOCODING_API);
-          providerUrl.searchParams.set("address", address);
-          providerUrl.searchParams.set("key", config.geocodingKey);
-          const upstream = await fetchJson(fetchImpl, providerUrl, {
-            headers: providerHeaders(),
-            signal: requestSignal(config.timeoutMs),
-          });
-          if (!upstream.ok) {
-            const error = new Error("Address lookup request failed.");
-            error.providerStatus = upstream.status;
-            throw error;
-          }
-          return upstream.data;
+          return geocodeWithCensus(fetchImpl, config, address);
         });
         writeJson(response, 200, cached.value, {
           "X-FlightLane-Cache": cached.cacheStatus,
@@ -637,14 +1223,6 @@ export function createFlightLaneServer({
       }
 
       if (method === "GET" && url.pathname === "/v1/map") {
-        if (!config.mapsKey) {
-          writeJson(response, 503, {
-            ok: false,
-            error:
-              "Satellite maps are not configured. Add a Google Maps API key to .env.local.",
-          });
-          return;
-        }
         const latitude = queryNumber(url, "latitude");
         const longitude = queryNumber(url, "longitude");
         const zoom = queryNumber(url, "zoom");
@@ -671,38 +1249,47 @@ export function createFlightLaneServer({
           return;
         }
 
-        const providerUrl = new URL(STATIC_MAP_API);
-        providerUrl.searchParams.set(
-          "center",
-          `${rounded(latitude, 5)},${rounded(longitude, 5)}`,
-        );
-        providerUrl.searchParams.set("zoom", String(zoom));
-        providerUrl.searchParams.set("size", `${logicalSize}x${logicalSize}`);
-        providerUrl.searchParams.set("scale", "2");
-        providerUrl.searchParams.set("maptype", "hybrid");
-        providerUrl.searchParams.set("format", "jpg-baseline");
-        providerUrl.searchParams.set("language", "en");
-        providerUrl.searchParams.set("region", "US");
-        providerUrl.searchParams.set("key", config.mapsKey);
+        const bbox = mapBoundingBox(rounded(latitude, 5), rounded(longitude, 5), zoom, logicalSize);
+        const cached = await mapCache.getOrLoad(
+          `${bbox.join(",")}|${logicalSize}`,
+          config.mapCacheSeconds,
+          async () => {
+            const imageSize = logicalSize * 2;
+            const providerUrl = new URL(IMAGERY_EXPORT_API);
+            providerUrl.searchParams.set("bbox", bbox.join(","));
+            providerUrl.searchParams.set("bboxSR", "3857");
+            providerUrl.searchParams.set("imageSR", "3857");
+            providerUrl.searchParams.set("size", `${imageSize},${imageSize}`);
+            providerUrl.searchParams.set("format", "jpg");
+            providerUrl.searchParams.set("f", "image");
 
-        const upstream = await fetchImpl(providerUrl, {
-          headers: { "User-Agent": USER_AGENT },
-          signal: requestSignal(config.timeoutMs),
-        });
-        const contentType = upstream.headers.get("content-type") || "";
-        if (!upstream.ok || !contentType.startsWith("image/")) {
-          writeProviderError(response, "Satellite map", upstream.status);
-          return;
-        }
-        const image = await readResponseBytes(upstream, MAX_MAP_BYTES);
+            const upstream = await fetchImpl(providerUrl, {
+              headers: { "User-Agent": USER_AGENT },
+              signal: requestSignal(config.timeoutMs),
+            });
+            const contentType = upstream.headers.get("content-type") || "";
+            if (!upstream.ok || !contentType.startsWith("image/")) {
+              const error = new Error("Satellite map request failed.");
+              error.providerStatus = upstream.status;
+              error.feature = "Satellite map";
+              throw error;
+            }
+            return {
+              contentType,
+              image: await readResponseBytes(upstream, MAX_MAP_BYTES),
+            };
+          },
+        );
         response.writeHead(
           200,
           secureHeaders({
-            "Content-Type": contentType,
-            "Content-Length": String(image.length),
+            "Content-Type": cached.value.contentType,
+            "Content-Length": String(cached.value.image.length),
+            "X-FlightLane-Cache": cached.cacheStatus,
+            "X-FlightLane-Attribution": IMAGERY_ATTRIBUTION,
           }),
         );
-        response.end(image);
+        response.end(cached.value.image);
         return;
       }
 
@@ -751,7 +1338,7 @@ export function createFlightLaneServer({
       writeJson(response, 404, { ok: false, error: "Not found." });
     } catch (error) {
       if (error && Number.isInteger(error.providerStatus)) {
-        writeProviderError(response, "Provider data", error.providerStatus);
+        writeProviderError(response, error.feature || "Provider data", error.providerStatus);
         return;
       }
       const isInputError =
@@ -771,6 +1358,8 @@ export function createFlightLaneServer({
       });
     }
   });
+  server.on("close", () => clearTimeout(pollTimer));
+  return server;
 }
 
 export async function startServer({
@@ -785,9 +1374,15 @@ export async function startServer({
   });
   console.log(`Flight Lane local service is listening on http://${config.host}:${config.port}`);
   console.log(
-    `Features: maps=${Boolean(config.mapsKey)} geocoding=${Boolean(
-      config.geocodingKey,
-    )} flightDetails=${Boolean(config.flightAwareKey)} photos=${
+    `Features: maps=usgs geocoding=census flightRoutes=${config.flightRoutesEnabled} flightAware=${
+      config.flightAwareKey
+        ? `preferred, ${
+            config.flightAwareSpendWarning === undefined
+              ? "spend not shown"
+              : `warn $${config.flightAwareSpendWarning}`
+          }, limit $${config.flightAwareSpendLimit}, ${config.flightAwareDailyLimit}/day`
+        : "off"
+    } photos=${
       config.aircraftPhotosEnabled
     }`,
   );
